@@ -204,7 +204,7 @@ def main():
         selected_song = st.selectbox(
             "Select a song to generate video for",
             options=songs,
-            format_func=lambda x: f"{x['title']} - {x['artist']}"
+            format_func=lambda x: x['title']
         )
         
         if st.button("Generate Video"):
