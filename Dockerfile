@@ -22,4 +22,4 @@ RUN mkdir -p video_clips
 ENV PYTHONUNBUFFERED=1
 
 # Command to run the application
-CMD ["python", "main.py"] 
+CMD ["streamlit", "run", "clip_manager.py", "--server.address=0.0.0.0"] 
