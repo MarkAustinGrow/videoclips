@@ -168,7 +168,6 @@ def main():
                                     supabase.table('video_clips').insert({
                                         'filename': clip_filename,
                                         'filepath': urls['internal_url'],  # Store internal URL for Docker network
-                                        'public_url': urls['external_url'],  # Store external URL for public access
                                         'song_id': selected_song,
                                         'start_time': selected_segment['start'],
                                         'end_time': selected_segment['end'],
