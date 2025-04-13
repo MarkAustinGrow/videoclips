@@ -13,8 +13,8 @@ def upload_to_server(local_path: str, remote_filename: str):
     try:
         transport = paramiko.Transport(('172.236.1.244', 22))
         transport.connect(
-            username='root',  # Replace with your Linode username if different
-            key_filename=os.path.expanduser('~/.ssh/id_rsa')  # Use SSH key authentication
+            username='root',
+            password=os.getenv('LINODE_SERVER_PASSWORD')
         )
         
         sftp = paramiko.SFTPClient.from_transport(transport)
