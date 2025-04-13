@@ -34,12 +34,24 @@ def upload_to_server(local_path: str, remote_filename: str):
         st.error(f"Upload failed: {str(e)}")
         return False
 
+def fetch_songs(supabase):
+    """Fetch all songs from Supabase."""
+    try:
+        response = supabase.table('songs').select('id, title').execute()
+        return response.data
+    except Exception as e:
+        st.error(f"Error fetching songs: {str(e)}")
+        return []
+
 def main():
     st.title("🎵 K-Pop Video Clip Manager")
     
     # Initialize clients
     supabase = init_supabase()
     processor = VideoProcessor()
+    
+    # Fetch available songs
+    songs = fetch_songs(supabase)
     
     # File uploader for the main video
     st.header("1. Upload Original Video")
@@ -94,15 +106,33 @@ def main():
                             with col2:
                                 # Metadata form
                                 st.subheader("Clip Metadata")
+                                
+                                # Song selector
+                                song_options = {song['id']: song['title'] for song in songs}
+                                selected_song = st.selectbox(
+                                    "Song",
+                                    options=list(song_options.keys()),
+                                    format_func=lambda x: song_options[x],
+                                    key=f"song_{clip['filename']}"
+                                )
+                                
                                 scene_type = st.selectbox(
                                     "Scene Type",
                                     ["performance", "closeup", "group", "dance", "b-roll", "transition"],
                                     key=f"scene_type_{clip['filename']}"
                                 )
+                                
                                 scene_tags = st.text_input(
                                     "Scene Tags (comma separated)",
                                     key=f"scene_tags_{clip['filename']}"
                                 )
+                                
+                                source_text = st.text_area(
+                                    "Source Text/Lyrics",
+                                    value=clip.get('text', ''),  # Pre-fill with transcription text if available
+                                    key=f"source_{clip['filename']}"
+                                )
+                                
                                 manual_description = st.text_area(
                                     "Manual Description",
                                     key=f"desc_{clip['filename']}"
@@ -115,12 +145,13 @@ def main():
                                             supabase.table('video_clips').insert({
                                                 'filename': clip['filename'],
                                                 'filepath': f"/videos/{clip['filename']}",
-                                                'song_id': clip['song_id'],
+                                                'song_id': selected_song,
                                                 'start_time': clip['start_time'],
                                                 'end_time': clip['end_time'],
                                                 'order_index': clip['order_index'],
                                                 'scene_type': scene_type,
                                                 'scene_tags': scene_tags.split(','),
+                                                'source_text': source_text,
                                                 'manual_description': manual_description
                                             }).execute()
                                             st.success(f"Uploaded {clip['filename']} with metadata")
