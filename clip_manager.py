@@ -78,11 +78,13 @@ def main():
                         )
                         st.success("Video processed into clips!")
                         
-                        # Display clips
+                        # Display clips and metadata form
                         st.header("4. Generated Clips")
                         for clip in clips_metadata:
                             clip_path = os.path.join(processor.clips_dir, clip['filename'])
-                            col1, col2 = st.columns([3, 1])
+                            
+                            # Create columns for layout
+                            col1, col2 = st.columns([2, 1])
                             
                             with col1:
                                 st.text(f"Clip: {clip['filename']}")
@@ -90,19 +92,38 @@ def main():
                                     st.video(clip_path)
                             
                             with col2:
+                                # Metadata form
+                                st.subheader("Clip Metadata")
+                                scene_type = st.selectbox(
+                                    "Scene Type",
+                                    ["performance", "closeup", "group", "dance", "b-roll", "transition"],
+                                    key=f"scene_type_{clip['filename']}"
+                                )
+                                scene_tags = st.text_input(
+                                    "Scene Tags (comma separated)",
+                                    key=f"scene_tags_{clip['filename']}"
+                                )
+                                manual_description = st.text_area(
+                                    "Manual Description",
+                                    key=f"desc_{clip['filename']}"
+                                )
+                                
                                 if st.button(f"Upload {clip['filename']}", key=clip['filename']):
                                     with st.spinner(f"Uploading {clip['filename']}..."):
                                         if upload_to_server(clip_path, clip['filename']):
-                                            # Update Supabase
+                                            # Update Supabase with metadata
                                             supabase.table('video_clips').insert({
                                                 'filename': clip['filename'],
                                                 'filepath': f"/videos/{clip['filename']}",
                                                 'song_id': clip['song_id'],
                                                 'start_time': clip['start_time'],
                                                 'end_time': clip['end_time'],
-                                                'order_index': clip['order_index']
+                                                'order_index': clip['order_index'],
+                                                'scene_type': scene_type,
+                                                'scene_tags': scene_tags.split(','),
+                                                'manual_description': manual_description
                                             }).execute()
-                                            st.success(f"Uploaded {clip['filename']}")
+                                            st.success(f"Uploaded {clip['filename']} with metadata")
                 
             except json.JSONDecodeError:
                 st.error("Invalid JSON data. Please check the format.")
