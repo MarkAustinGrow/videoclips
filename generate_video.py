@@ -28,7 +28,8 @@ def find_matching_clip(supabase, text: str, song_id: str = None) -> Dict:
     
     # Normalize the text for "oh" patterns
     normalized_text = text.strip().lower()
-    is_oh_pattern = all(word.lower() == 'oh' for word in text.split(','))
+    words = [word.strip() for word in normalized_text.split(',')]
+    is_oh_pattern = all(word == 'oh' for word in words if word)  # Skip empty strings
     
     # First try exact match from same song
     query = supabase.table('video_clips').select('*')
@@ -42,6 +43,20 @@ def find_matching_clip(supabase, text: str, song_id: str = None) -> Dict:
     # For "oh" patterns, try matching any "oh" sequence from the same song
     if is_oh_pattern and song_id:
         print("Trying to match any 'oh' sequence from same song")
+        # Try to find a clip with similar number of "oh"s
+        oh_count = len([w for w in words if w == 'oh'])
+        print(f"Looking for clips with approximately {oh_count} 'oh's")
+        
+        # First try clips with exactly the same number of "oh"s
+        result = query.eq('song_id', song_id).execute()
+        for clip in result.data:
+            clip_words = [w.strip().lower() for w in clip['source_text'].split(',')]
+            clip_oh_count = len([w for w in clip_words if w == 'oh'])
+            if clip_oh_count == oh_count:
+                print(f"Found clip with matching number of 'oh's: {clip['source_text']}")
+                return clip
+        
+        # If no exact count match, try any "oh" sequence
         result = query.eq('song_id', song_id).ilike('source_text', '%oh%oh%').execute()
         if result.data:
             print("Found 'oh' sequence match from same song!")
