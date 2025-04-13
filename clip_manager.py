@@ -32,6 +32,10 @@ def upload_to_server(local_path: str, remote_filename: str):
         st.error(f"Upload failed: {str(e)}")
         return None
 
+def get_file_size(file_path: str) -> int:
+    """Get file size in bytes."""
+    return os.path.getsize(file_path)
+
 def fetch_songs(supabase):
     """Fetch all songs from Supabase."""
     try:
@@ -125,6 +129,9 @@ def main():
                         with open(temp_path, "wb") as f:
                             f.write(clip_file.getvalue())
                         
+                        # Get file size
+                        file_size = get_file_size(temp_path)
+                        
                         # Upload to Linode and get URL
                         clip_url = upload_to_server(temp_path, clip_filename)
                         
@@ -141,7 +148,8 @@ def main():
                                     'scene_type': scene_type,
                                     'scene_tags': scene_tags.split(','),
                                     'source_text': selected_segment['text'],
-                                    'manual_description': manual_description
+                                    'manual_description': manual_description,
+                                    'filesize': file_size
                                 }).execute()
                                 st.success(f"Uploaded clip {segment_index} with metadata")
                                 
