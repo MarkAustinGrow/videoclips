@@ -9,10 +9,12 @@ from datetime import datetime
 def download_clip(url: str, local_path: str) -> bool:
     """Download a clip from URL to local path."""
     try:
+        print(f"Downloading clip from {url} to {local_path}")
         response = requests.get(url)
         response.raise_for_status()
         with open(local_path, 'wb') as f:
             f.write(response.content)
+        print(f"Successfully downloaded clip: {local_path}")
         return True
     except Exception as e:
         print(f"Error downloading clip {url}: {str(e)}")
@@ -20,28 +22,34 @@ def download_clip(url: str, local_path: str) -> bool:
 
 def find_matching_clip(supabase, text: str, song_id: str = None) -> Dict:
     """Find clips with matching text, optionally from the same song."""
+    print(f"\nLooking for clip matching text: '{text}'")
+    
     # First try exact match from same song
     query = supabase.table('video_clips').select('*')
     if song_id:
+        print(f"Trying exact match from same song (song_id: {song_id})")
         result = query.eq('song_id', song_id).eq('source_text', text).execute()
         if result.data:
+            print("Found exact match from same song!")
             return result.data[0]
     
     # Then try exact match from any song
+    print("Trying exact match from any song")
     result = query.eq('source_text', text).execute()
     if result.data:
+        print("Found exact match from different song!")
         return result.data[0]
     
     # If no exact matches, try finding clips with similar text
-    # This uses case-insensitive pattern matching
+    print("Trying fuzzy text matching")
     text_pattern = text.lower().replace("'", "''")  # Escape single quotes
     result = query.ilike('source_text', f"%{text_pattern}%").execute()
     if result.data:
+        print("Found clip with similar text!")
         return result.data[0]
     
-    # If still no matches, return any available clip as placeholder
-    result = query.limit(1).execute()
-    return result.data[0] if result.data else None
+    print("No matching clips found")
+    return None
 
 def track_clip_usage(supabase, clip_id: str, song_id: str, segment_index: int):
     """Track when and how a clip is used."""
@@ -68,10 +76,15 @@ def track_clip_usage(supabase, clip_id: str, song_id: str, segment_index: int):
 
 def generate_video(song_id: str, transcription_data: List[Dict], audio_path: str = None):
     """Generate a video from clips based on transcription data."""
+    print("\n=== Starting Video Generation ===")
+    print(f"Song ID: {song_id}")
+    print(f"Number of segments: {len(transcription_data)}")
+    
     supabase = init_supabase()
     
     # Create temporary directory for clips
     os.makedirs("temp_clips", exist_ok=True)
+    print("Created temporary directory for clips")
     
     try:
         clips = []
@@ -79,38 +92,48 @@ def generate_video(song_id: str, transcription_data: List[Dict], audio_path: str
         
         # Process each segment
         for i, segment in enumerate(transcription_data):
+            print(f"\nProcessing segment {i}: {segment['text']}")
+            
             # Try to find clip for this segment
             clip_data = find_matching_clip(supabase, segment['text'], song_id)
             
             if clip_data:
+                print(f"Found clip: {clip_data['filename']}")
                 # Track usage if not already used in this video
                 if clip_data['id'] not in used_clips:
+                    print("Tracking clip usage")
                     track_clip_usage(supabase, clip_data['id'], song_id, i)
                     used_clips.add(clip_data['id'])
                 
                 # Download clip using internal Docker network URL
                 local_path = f"temp_clips/clip_{i:03d}.mp4"
-                if download_clip(clip_data['filepath'], local_path):  # This should be the internal URL
+                if download_clip(clip_data['filepath'], local_path):
+                    print(f"Loading clip into moviepy: {local_path}")
                     clip = VideoFileClip(local_path)
                     clips.append(clip)
+                    print("Successfully added clip to sequence")
                 else:
                     print(f"Failed to download clip for segment {i}")
             else:
                 print(f"No clip found for segment {i}: {segment['text']}")
         
         if clips:
+            print(f"\nFound {len(clips)} clips to combine")
             # Concatenate all clips
+            print("Concatenating clips...")
             final_clip = concatenate_videoclips(clips)
             
             # Add audio if provided
             if audio_path and os.path.exists(audio_path):
+                print("Adding audio track")
                 audio = AudioFileClip(audio_path)
                 final_clip = final_clip.set_audio(audio)
             
             # Write final video
             output_path = "output_video.mp4"
+            print(f"Writing final video to {output_path}")
             final_clip.write_videofile(output_path)
-            print(f"Video generated: {output_path}")
+            print(f"Video generated successfully: {output_path}")
             
             # Clean up
             final_clip.close()
@@ -119,19 +142,21 @@ def generate_video(song_id: str, transcription_data: List[Dict], audio_path: str
             
             return output_path
         else:
-            print("No clips available to generate video")
+            print("\nNo clips available to generate video")
             return None
             
     except Exception as e:
-        print(f"Error generating video: {str(e)}")
+        print(f"\nError generating video: {str(e)}")
         return None
     finally:
         # Clean up temporary files
+        print("\nCleaning up temporary files")
         for file in os.listdir("temp_clips"):
             try:
                 os.remove(os.path.join("temp_clips", file))
             except:
                 pass
+        print("Cleanup complete")
 
 if __name__ == "__main__":
     # Example usage
