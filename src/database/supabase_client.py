@@ -1,5 +1,6 @@
 import os
 from supabase import create_client, Client
+from typing import Dict, Any
 
 def init_supabase() -> Client:
     """Initialize Supabase client with environment variables."""
@@ -10,13 +11,18 @@ def init_supabase() -> Client:
         raise ValueError("Missing Supabase credentials in environment variables")
     
     try:
-        # Initialize with minimal headers
-        options = {
-            "headers": {
-                "X-Client-Info": "supabase-py/1.2.0"
+        # Create options with proper structure
+        options: Dict[str, Any] = {
+            'schema': 'public',
+            'headers': {
+                'X-Client-Info': 'supabase-py/1.2.0'
+            },
+            'auth': {
+                'persistSession': False
             }
         }
-        return create_client(url, key, options=options)
+        
+        return create_client(url, key, options)
     except Exception as e:
         print(f"Error initializing Supabase client: {str(e)}")
         raise 
