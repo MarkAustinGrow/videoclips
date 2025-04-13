@@ -93,6 +93,9 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         print(f"Song ID: {song_id}")
         print(f"Number of segments: {len(transcription_data)}")
         
+        # Initialize Supabase client
+        supabase = init_supabase()
+        
         # Create temp directory for clips
         temp_dir = "temp_clips"
         os.makedirs(temp_dir, exist_ok=True)
@@ -111,25 +114,32 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                 progress_callback(i, f"Processing segment {i+1}/{len(transcription_data)}")
             
             # Find matching clip
-            clip_info = find_matching_clip(song_id, segment_text)
+            clip_info = find_matching_clip(supabase, segment_text, song_id)
             
             if clip_info:
-                clip_filename = clip_info['filename']
+                # Get the correct URL from the clip info
+                clip_url = clip_info.get('filepath') or clip_info.get('public_url')
+                if not clip_url:
+                    print(f"No valid URL found for clip: {clip_info}")
+                    continue
+                    
                 temp_clip_path = os.path.join(temp_dir, f"clip_{i:03d}.mp4")
                 
                 try:
                     # Download and add clip to sequence
-                    download_clip(clip_filename, temp_clip_path)
-                    print(f"Loading clip into moviepy: {temp_clip_path}")
-                    
-                    clip = VideoFileClip(temp_clip_path)
-                    video_sequence.append(clip)
-                    print("Successfully added clip to sequence")
-                    
-                    # Track clip usage
-                    track_clip_usage(song_id, clip_info['id'], i)
+                    if download_clip(clip_url, temp_clip_path):
+                        print(f"Loading clip into moviepy: {temp_clip_path}")
+                        
+                        clip = VideoFileClip(temp_clip_path)
+                        video_sequence.append(clip)
+                        print("Successfully added clip to sequence")
+                        
+                        # Track clip usage
+                        track_clip_usage(supabase, clip_info['id'], song_id, i)
+                    else:
+                        print(f"Failed to download clip from {clip_url}")
                 except Exception as e:
-                    print(f"Error processing clip {clip_filename}: {str(e)}")
+                    print(f"Error processing clip: {str(e)}")
                     if progress_callback:
                         progress_callback(i, f"Error with clip {i+1}: {str(e)}")
                     continue
