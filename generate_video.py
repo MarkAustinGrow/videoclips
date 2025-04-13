@@ -5,6 +5,8 @@ from typing import List, Dict
 from moviepy.editor import VideoFileClip, concatenate_videoclips, AudioFileClip
 from src.database.supabase_client import init_supabase
 from datetime import datetime
+import shutil
+import traceback
 
 def download_clip(url: str, local_path: str) -> bool:
     """Download a clip from URL to local path."""
@@ -74,89 +76,109 @@ def track_clip_usage(supabase, clip_id: str, song_id: str, segment_index: int):
         print(f"Error tracking clip usage: {str(e)}")
         return False
 
-def generate_video(song_id: str, transcription_data: List[Dict], audio_path: str = None):
-    """Generate a video from clips based on transcription data."""
-    print("\n=== Starting Video Generation ===")
-    print(f"Song ID: {song_id}")
-    print(f"Number of segments: {len(transcription_data)}")
+def generate_video(song_id: str, transcription_data: list, progress_callback=None):
+    """
+    Generate a video from transcription data and clips.
     
-    supabase = init_supabase()
+    Args:
+        song_id: The ID of the song to generate video for
+        transcription_data: List of transcription segments
+        progress_callback: Optional callback function(current_segment, message) for progress updates
     
-    # Create temporary directory for clips
-    os.makedirs("temp_clips", exist_ok=True)
-    print("Created temporary directory for clips")
-    
+    Returns:
+        str: Path to the generated video file, or None if generation failed
+    """
     try:
-        clips = []
-        used_clips = set()  # Track clips used in this video
+        print("\n=== Starting Video Generation ===")
+        print(f"Song ID: {song_id}")
+        print(f"Number of segments: {len(transcription_data)}")
         
-        # Process each segment
+        # Create temp directory for clips
+        temp_dir = "temp_clips"
+        os.makedirs(temp_dir, exist_ok=True)
+        print(f"Created temporary directory for clips")
+        
+        # Initialize video sequence
+        video_sequence = []
+        
         for i, segment in enumerate(transcription_data):
-            print(f"\nProcessing segment {i}: {segment['text']}")
-            
-            # Try to find clip for this segment
-            clip_data = find_matching_clip(supabase, segment['text'], song_id)
-            
-            if clip_data:
-                print(f"Found clip: {clip_data['filename']}")
-                # Track usage if not already used in this video
-                if clip_data['id'] not in used_clips:
-                    print("Tracking clip usage")
-                    track_clip_usage(supabase, clip_data['id'], song_id, i)
-                    used_clips.add(clip_data['id'])
+            segment_text = segment.get('text', '').strip()
+            if not segment_text:
+                continue
                 
-                # Download clip using internal Docker network URL
-                local_path = f"temp_clips/clip_{i:03d}.mp4"
-                if download_clip(clip_data['filepath'], local_path):
-                    print(f"Loading clip into moviepy: {local_path}")
-                    clip = VideoFileClip(local_path)
-                    clips.append(clip)
+            print(f"\nProcessing segment {i}: {segment_text}")
+            if progress_callback:
+                progress_callback(i, f"Processing segment {i+1}/{len(transcription_data)}")
+            
+            # Find matching clip
+            clip_info = find_matching_clip(song_id, segment_text)
+            
+            if clip_info:
+                clip_filename = clip_info['filename']
+                temp_clip_path = os.path.join(temp_dir, f"clip_{i:03d}.mp4")
+                
+                try:
+                    # Download and add clip to sequence
+                    download_clip(clip_filename, temp_clip_path)
+                    print(f"Loading clip into moviepy: {temp_clip_path}")
+                    
+                    clip = VideoFileClip(temp_clip_path)
+                    video_sequence.append(clip)
                     print("Successfully added clip to sequence")
-                else:
-                    print(f"Failed to download clip for segment {i}")
+                    
+                    # Track clip usage
+                    track_clip_usage(song_id, clip_info['id'], i)
+                except Exception as e:
+                    print(f"Error processing clip {clip_filename}: {str(e)}")
+                    if progress_callback:
+                        progress_callback(i, f"Error with clip {i+1}: {str(e)}")
+                    continue
             else:
-                print(f"No clip found for segment {i}: {segment['text']}")
+                print(f"No clip found for segment {i}: {segment_text}")
+                if progress_callback:
+                    progress_callback(i, f"No clip found for segment {i+1}")
         
-        if clips:
-            print(f"\nFound {len(clips)} clips to combine")
-            # Concatenate all clips
-            print("Concatenating clips...")
-            final_clip = concatenate_videoclips(clips)
-            
-            # Add audio if provided
-            if audio_path and os.path.exists(audio_path):
-                print("Adding audio track")
-                audio = AudioFileClip(audio_path)
-                final_clip = final_clip.set_audio(audio)
-            
-            # Write final video
-            output_path = "output_video.mp4"
-            print(f"Writing final video to {output_path}")
-            final_clip.write_videofile(output_path)
-            print(f"Video generated successfully: {output_path}")
-            
-            # Clean up
-            final_clip.close()
-            for clip in clips:
-                clip.close()
-            
-            return output_path
-        else:
-            print("\nNo clips available to generate video")
+        if not video_sequence:
+            print("No clips were found to generate video")
             return None
             
+        # Generate output path
+        output_dir = "generated_videos"
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, f"generated_{song_id}.mp4")
+        
+        if progress_callback:
+            progress_callback(len(transcription_data)-1, "Concatenating clips...")
+            
+        print("\nConcatenating clips...")
+        final_video = concatenate_videoclips(video_sequence)
+        
+        if progress_callback:
+            progress_callback(len(transcription_data)-1, "Writing final video...")
+            
+        print(f"Writing video to {output_path}")
+        final_video.write_videofile(output_path)
+        
+        # Clean up
+        print("\nCleaning up temporary files...")
+        for clip in video_sequence:
+            clip.close()
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        return output_path
+        
     except Exception as e:
         print(f"\nError generating video: {str(e)}")
+        traceback.print_exc()
         return None
     finally:
-        # Clean up temporary files
-        print("\nCleaning up temporary files")
-        for file in os.listdir("temp_clips"):
-            try:
-                os.remove(os.path.join("temp_clips", file))
-            except:
-                pass
-        print("Cleanup complete")
+        # Ensure clips are closed and temp files cleaned up
+        try:
+            for clip in video_sequence:
+                clip.close()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except:
+            pass
 
 if __name__ == "__main__":
     # Example usage

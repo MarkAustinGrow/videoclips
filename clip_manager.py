@@ -194,83 +194,70 @@ def main():
     with tab2:
         st.header("Generate Music Video")
         
-        # Song selection for video generation
+        # Get available songs
         songs = fetch_songs(supabase)
-        song_options = {song['id']: song['title'] for song in songs}
-        
-        target_song = st.selectbox(
-            "Select Song to Generate Video For",
-            options=list(song_options.keys()),
-            format_func=lambda x: song_options[x],
-            key="generate_song"
+        if not songs:
+            st.warning("No songs found in database. Please upload some clips first.")
+            return
+            
+        # Song selection
+        selected_song = st.selectbox(
+            "Select a song to generate video for",
+            options=songs,
+            format_func=lambda x: f"{x['title']} - {x['artist']}"
         )
         
-        # Transcription input
-        transcription_text = st.text_area(
-            "Paste the transcription JSON data for the target song",
-            height=200,
-            key="generate_transcription"
-        )
-        
-        if transcription_text:
-            try:
-                transcription_data = json.loads(transcription_text)
+        if st.button("Generate Video"):
+            if not selected_song:
+                st.error("Please select a song first")
+                return
                 
-                # Display clip reuse options
-                st.subheader("Clip Reuse Settings")
+            with st.spinner("Preparing to generate video..."):
+                # Get transcription data
+                transcription = get_transcription(selected_song['id'])
+                if not transcription:
+                    st.error("No transcription data found for this song")
+                    return
+                    
+                # Progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-                allow_other_songs = st.checkbox(
-                    "Allow using clips from other songs",
-                    value=True,
-                    help="If checked, the system will look for matching clips from other songs when needed"
-                )
+                def update_progress(current_segment, message):
+                    # Update progress bar (0-100%)
+                    progress = (current_segment + 1) / len(transcription) * 100
+                    progress_bar.progress(int(progress))
+                    status_text.text(message)
                 
-                use_fuzzy_matching = st.checkbox(
-                    "Use fuzzy text matching",
-                    value=True,
-                    help="If checked, the system will try to find clips with similar text when exact matches aren't found"
-                )
-                
-                if st.button("Generate Video"):
-                    with st.spinner("Generating video..."):
-                        # Call generate_video function
-                        output_path = generate_video(
-                            song_id=target_song,
-                            transcription_data=transcription_data
-                        )
+                try:
+                    # Generate video with progress tracking
+                    output_path = generate_video(
+                        selected_song['id'],
+                        transcription,
+                        progress_callback=update_progress
+                    )
+                    
+                    if output_path and os.path.exists(output_path):
+                        # Show success and video player
+                        st.success("Video generated successfully!")
+                        st.video(output_path)
                         
-                        if output_path and os.path.exists(output_path):
-                            # Upload to server
-                            video_filename = f"generated_{target_song}.mp4"
-                            video_url = upload_to_server(output_path, video_filename)
-                            
-                            if video_url:
-                                st.success("Video generated successfully!")
-                                st.video(video_url)
-                                
-                                # Display clip usage statistics
-                                st.subheader("Clip Usage Statistics")
-                                try:
-                                    stats = supabase.table('clip_usages')\
-                                        .select('clip_id, video_clips(source_text)')\
-                                        .eq('song_id', target_song)\
-                                        .execute()
-                                    
-                                    if stats.data:
-                                        st.write("Clips used in this video:")
-                                        for usage in stats.data:
-                                            st.write(f"- {usage['video_clips']['source_text']}")
-                                except Exception as e:
-                                    st.error(f"Error fetching usage statistics: {str(e)}")
-                            else:
-                                st.error("Failed to upload generated video")
-                        else:
-                            st.error("Failed to generate video")
-                            
-            except json.JSONDecodeError:
-                st.error("Invalid JSON data. Please check the format.")
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+                        # Download button
+                        with open(output_path, 'rb') as f:
+                            st.download_button(
+                                "Download Video",
+                                f,
+                                file_name=f"generated_{selected_song['title']}.mp4",
+                                mime="video/mp4"
+                            )
+                    else:
+                        st.error("Failed to generate video. Check logs for details.")
+                except Exception as e:
+                    st.error(f"Error during video generation: {str(e)}")
+                finally:
+                    # Clear progress indicators
+                    progress_bar.empty()
+                    status_text.empty()
 
 if __name__ == "__main__":
     main() 
