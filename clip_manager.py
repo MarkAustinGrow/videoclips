@@ -9,29 +9,28 @@ from src.database.supabase_client import init_supabase
 load_dotenv()
 
 def upload_to_server(local_path: str, remote_filename: str):
-    """Upload a file to the video server via SFTP."""
+    """Upload a file to the Linode server via SFTP."""
     try:
-        transport = paramiko.Transport((
-            os.getenv('VIDEO_SERVER'),
-            22
-        ))
+        transport = paramiko.Transport(('172.236.1.244', 22))
         transport.connect(
-            username=os.getenv('VIDEO_SERVER_USER'),
-            password=os.getenv('VIDEO_SERVER_PASSWORD')
+            username='root',  # Replace with your Linode username if different
+            key_filename=os.path.expanduser('~/.ssh/id_rsa')  # Use SSH key authentication
         )
         
         sftp = paramiko.SFTPClient.from_transport(transport)
         
-        # Upload to videos directory
+        # Upload to videos directory on Linode
         remote_path = f'/var/www/html/videos/{remote_filename}'
         sftp.put(local_path, remote_path)
         
         sftp.close()
         transport.close()
-        return True
+        
+        # Return the public URL
+        return f'http://172.236.1.244/videos/{remote_filename}'
     except Exception as e:
         st.error(f"Upload failed: {str(e)}")
-        return False
+        return None
 
 def fetch_songs(supabase):
     """Fetch all songs from Supabase."""
@@ -118,27 +117,38 @@ def main():
                     )
                     
                     if st.button("Upload Clip"):
-                        # Save clip file
+                        # Save clip file temporarily
                         clip_filename = f"clip_{segment_index:03d}.mp4"
-                        with open(f"video_clips/{clip_filename}", "wb") as f:
+                        temp_path = f"video_clips/{clip_filename}"
+                        os.makedirs("video_clips", exist_ok=True)
+                        
+                        with open(temp_path, "wb") as f:
                             f.write(clip_file.getvalue())
                         
-                        # Upload to server and Supabase
-                        if upload_to_server(f"video_clips/{clip_filename}", clip_filename):
+                        # Upload to Linode and get URL
+                        clip_url = upload_to_server(temp_path, clip_filename)
+                        
+                        if clip_url:
                             # Update Supabase with metadata
-                            supabase.table('video_clips').insert({
-                                'filename': clip_filename,
-                                'filepath': f"/videos/{clip_filename}",
-                                'song_id': selected_song,
-                                'start_time': selected_segment['start'],
-                                'end_time': selected_segment['end'],
-                                'order_index': segment_index,
-                                'scene_type': scene_type,
-                                'scene_tags': scene_tags.split(','),
-                                'source_text': selected_segment['text'],
-                                'manual_description': manual_description
-                            }).execute()
-                            st.success(f"Uploaded clip {segment_index} with metadata")
+                            try:
+                                supabase.table('video_clips').insert({
+                                    'filename': clip_filename,
+                                    'filepath': clip_url,  # Store the full URL
+                                    'song_id': selected_song,
+                                    'start_time': selected_segment['start'],
+                                    'end_time': selected_segment['end'],
+                                    'order_index': segment_index,
+                                    'scene_type': scene_type,
+                                    'scene_tags': scene_tags.split(','),
+                                    'source_text': selected_segment['text'],
+                                    'manual_description': manual_description
+                                }).execute()
+                                st.success(f"Uploaded clip {segment_index} with metadata")
+                                
+                                # Clean up temporary file
+                                os.remove(temp_path)
+                            except Exception as e:
+                                st.error(f"Failed to save metadata: {str(e)}")
             
             # Display progress
             st.header("3. Upload Progress")
@@ -165,7 +175,4 @@ def main():
             st.error(f"Error: {str(e)}")
 
 if __name__ == "__main__":
-    # Create necessary directories
-    os.makedirs("video_clips", exist_ok=True)
-    
     main() 
