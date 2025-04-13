@@ -237,7 +237,28 @@ def main():
                 if not transcription:
                     st.error("No transcription data found for this song")
                     return
+                
+                # Check for missing clips first
+                missing_segments = []
+                for i, segment in enumerate(transcription):
+                    segment_text = segment.get('text', '').strip()
+                    if segment_text:
+                        clip_info = find_matching_clip(supabase, segment_text, selected_song['id'])
+                        if not clip_info:
+                            missing_segments.append((i, segment_text))
+                
+                if missing_segments:
+                    st.warning("⚠️ Missing clips detected!")
+                    st.write("The following segments don't have matching clips:")
+                    for i, text in missing_segments:
+                        st.write(f"🎬 Segment {i+1}: \"{text}\"")
                     
+                    if st.button("Generate Video Anyway"):
+                        proceed_with_generation = True
+                    else:
+                        st.info("Please create clips for the missing segments first, or click 'Generate Video Anyway' to proceed with gaps.")
+                        return
+                
                 # Progress tracking
                 progress_bar = st.progress(0)
                 status_text = st.empty()
