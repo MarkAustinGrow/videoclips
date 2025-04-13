@@ -49,6 +49,17 @@ def fetch_songs(supabase):
         st.error(f"Error fetching songs: {str(e)}")
         return []
 
+def get_transcription(supabase, song_id: str):
+    """Fetch transcription data for a song from Supabase."""
+    try:
+        response = supabase.table('songs').select('transcribed').eq('id', song_id).single().execute()
+        if response.data and response.data.get('transcribed'):
+            return json.loads(response.data['transcribed'])
+        return None
+    except Exception as e:
+        st.error(f"Error fetching transcription: {str(e)}")
+        return None
+
 def main():
     st.title("🎵 K-Pop Video Clip Manager")
     
@@ -214,7 +225,7 @@ def main():
                 
             with st.spinner("Preparing to generate video..."):
                 # Get transcription data
-                transcription = get_transcription(selected_song['id'])
+                transcription = get_transcription(supabase, selected_song['id'])
                 if not transcription:
                     st.error("No transcription data found for this song")
                     return
