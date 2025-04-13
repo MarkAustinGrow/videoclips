@@ -9,4 +9,12 @@ def init_supabase() -> Client:
     if not url or not key:
         raise ValueError("Missing Supabase credentials in environment variables")
     
-    return create_client(url, key) 
+    # Initialize with proper options
+    options = {
+        "auth": {
+            "autoRefreshToken": True,
+            "persistSession": True
+        }
+    }
+    
+    return create_client(url, key, options=options) 
