@@ -54,7 +54,15 @@ def get_transcription(supabase, song_id: str):
     try:
         response = supabase.table('songs').select('transcribed').eq('id', song_id).single().execute()
         if response.data and response.data.get('transcribed'):
-            return json.loads(response.data['transcribed'])
+            transcribed_data = response.data['transcribed']
+            # Handle both string (JSON) and list data types
+            if isinstance(transcribed_data, str):
+                return json.loads(transcribed_data)
+            elif isinstance(transcribed_data, list):
+                return transcribed_data
+            else:
+                st.error(f"Unexpected transcription data type: {type(transcribed_data)}")
+                return None
         return None
     except Exception as e:
         st.error(f"Error fetching transcription: {str(e)}")
