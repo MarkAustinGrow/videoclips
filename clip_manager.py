@@ -27,8 +27,11 @@ def upload_to_server(local_path: str, remote_filename: str):
         sftp.close()
         transport.close()
         
-        # Return the public URL
-        return f'http://172.236.1.244/videos/{remote_filename}'
+        # Return both internal and external URLs
+        return {
+            'internal_url': f'http://nginx/videos/{remote_filename}',  # For Docker network
+            'external_url': f'http://172.236.1.244/videos/{remote_filename}'  # For public access
+        }
     except Exception as e:
         st.error(f"Upload failed: {str(e)}")
         return None
@@ -137,15 +140,16 @@ def main():
                             # Get file size
                             file_size = get_file_size(temp_path)
                             
-                            # Upload to Linode and get URL
-                            clip_url = upload_to_server(temp_path, clip_filename)
+                            # Upload to Linode and get URLs
+                            urls = upload_to_server(temp_path, clip_filename)
                             
-                            if clip_url:
+                            if urls:
                                 # Update Supabase with metadata
                                 try:
                                     supabase.table('video_clips').insert({
                                         'filename': clip_filename,
-                                        'filepath': clip_url,  # Store the full URL
+                                        'filepath': urls['internal_url'],  # Store internal URL for Docker network
+                                        'public_url': urls['external_url'],  # Store external URL for public access
                                         'song_id': selected_song,
                                         'start_time': selected_segment['start'],
                                         'end_time': selected_segment['end'],

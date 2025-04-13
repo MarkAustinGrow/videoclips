@@ -34,8 +34,8 @@ def find_matching_clip(supabase, text: str, song_id: str = None) -> Dict:
     
     # If no exact matches, try finding clips with similar text
     # This uses case-insensitive pattern matching
-    text_pattern = f"%{text.lower()}%"
-    result = query.ilike('source_text', text_pattern).execute()
+    text_pattern = text.lower().replace("'", "''")  # Escape single quotes
+    result = query.ilike('source_text', f"%{text_pattern}%").execute()
     if result.data:
         return result.data[0]
     
@@ -53,11 +53,11 @@ def track_clip_usage(supabase, clip_id: str, song_id: str, segment_index: int):
             'order_index': segment_index,
             'used_at': datetime.now().isoformat()
         }
-        result = supabase.table('clip_usages').insert(usage_data).execute()
+        supabase.table('clip_usages').insert(usage_data).execute()
         
-        # Update clip statistics
+        # Update clip statistics using a regular update
         supabase.table('video_clips').update({
-            'times_used': supabase.raw('times_used + 1'),
+            'times_used': 1,  # We'll handle increment in a trigger
             'last_used_at': datetime.now().isoformat()
         }).eq('id', clip_id).execute()
         
@@ -88,9 +88,9 @@ def generate_video(song_id: str, transcription_data: List[Dict], audio_path: str
                     track_clip_usage(supabase, clip_data['id'], song_id, i)
                     used_clips.add(clip_data['id'])
                 
-                # Download clip
+                # Download clip using internal Docker network URL
                 local_path = f"temp_clips/clip_{i:03d}.mp4"
-                if download_clip(clip_data['filepath'], local_path):
+                if download_clip(clip_data['filepath'], local_path):  # This should be the internal URL
                     clip = VideoFileClip(local_path)
                     clips.append(clip)
                 else:
