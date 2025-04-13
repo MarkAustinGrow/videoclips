@@ -4,7 +4,7 @@ import streamlit as st
 import paramiko
 from dotenv import load_dotenv
 from src.database.supabase_client import init_supabase
-from generate_video import generate_video
+from generate_video import generate_video, find_matching_clip
 
 # Load environment variables
 load_dotenv()
