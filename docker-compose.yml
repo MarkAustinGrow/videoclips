@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    volumes:
+      - .:/app
+      - video_clips:/app/video_clips
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    command: python main.py
+
+volumes:
+  video_clips: 

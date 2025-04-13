@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./video_clips:/app/video_clips
+      - ./input:/app/input
+    env_file:
+      - .env
+    ports:
+      - "8501:8501"  # Streamlit port
+    command: streamlit run clip_manager.py --server.address=0.0.0.0
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./video_clips:/usr/share/nginx/html/videos
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    ports:
+      - "80:80"
+    depends_on:
+      - app
+
+volumes:
+  video_clips:
+    driver: local 
