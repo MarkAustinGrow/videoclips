@@ -4,6 +4,7 @@ import requests
 from typing import List, Dict
 from moviepy.editor import VideoFileClip, concatenate_videoclips, AudioFileClip
 from src.database.supabase_client import init_supabase
+from datetime import datetime
 
 def download_clip(url: str, local_path: str) -> bool:
     """Download a clip from URL to local path."""
@@ -18,13 +19,52 @@ def download_clip(url: str, local_path: str) -> bool:
         return False
 
 def find_matching_clip(supabase, text: str, song_id: str = None) -> Dict:
-    """Find a clip with matching text, optionally from the same song."""
-    query = supabase.table('video_clips').select('*').eq('source_text', text)
+    """Find clips with matching text, optionally from the same song."""
+    # First try exact match from same song
+    query = supabase.table('video_clips').select('*')
     if song_id:
-        query = query.eq('song_id', song_id)
+        result = query.eq('song_id', song_id).eq('source_text', text).execute()
+        if result.data:
+            return result.data[0]
     
-    result = query.execute()
+    # Then try exact match from any song
+    result = query.eq('source_text', text).execute()
+    if result.data:
+        return result.data[0]
+    
+    # If no exact matches, try finding clips with similar text
+    # This uses case-insensitive pattern matching
+    text_pattern = f"%{text.lower()}%"
+    result = query.ilike('source_text', text_pattern).execute()
+    if result.data:
+        return result.data[0]
+    
+    # If still no matches, return any available clip as placeholder
+    result = query.limit(1).execute()
     return result.data[0] if result.data else None
+
+def track_clip_usage(supabase, clip_id: str, song_id: str, segment_index: int):
+    """Track when and how a clip is used."""
+    try:
+        # Insert usage record
+        usage_data = {
+            'clip_id': clip_id,
+            'song_id': song_id,
+            'order_index': segment_index,
+            'used_at': datetime.now().isoformat()
+        }
+        result = supabase.table('clip_usages').insert(usage_data).execute()
+        
+        # Update clip statistics
+        supabase.table('video_clips').update({
+            'times_used': supabase.raw('times_used + 1'),
+            'last_used_at': datetime.now().isoformat()
+        }).eq('id', clip_id).execute()
+        
+        return True
+    except Exception as e:
+        print(f"Error tracking clip usage: {str(e)}")
+        return False
 
 def generate_video(song_id: str, transcription_data: List[Dict], audio_path: str = None):
     """Generate a video from clips based on transcription data."""
@@ -35,17 +75,19 @@ def generate_video(song_id: str, transcription_data: List[Dict], audio_path: str
     
     try:
         clips = []
+        used_clips = set()  # Track clips used in this video
         
         # Process each segment
         for i, segment in enumerate(transcription_data):
             # Try to find clip for this segment
             clip_data = find_matching_clip(supabase, segment['text'], song_id)
             
-            if not clip_data:
-                # Try to find matching clip from any song
-                clip_data = find_matching_clip(supabase, segment['text'])
-            
             if clip_data:
+                # Track usage if not already used in this video
+                if clip_data['id'] not in used_clips:
+                    track_clip_usage(supabase, clip_data['id'], song_id, i)
+                    used_clips.add(clip_data['id'])
+                
                 # Download clip
                 local_path = f"temp_clips/clip_{i:03d}.mp4"
                 if download_clip(clip_data['filepath'], local_path):
