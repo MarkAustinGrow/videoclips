@@ -1,5 +1,5 @@
 python-dotenv==1.0.0
-supabase==2.3.0
+supabase-py==0.0.2
 openai==1.12.0
 moviepy==1.0.3
 numpy==1.24.3

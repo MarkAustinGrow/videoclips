@@ -1,6 +1,5 @@
 import os
 from supabase import create_client, Client
-from supabase.client import ClientOptions
 
 def init_supabase() -> Client:
     """Initialize Supabase client with environment variables."""
@@ -11,15 +10,7 @@ def init_supabase() -> Client:
         raise ValueError("Missing Supabase credentials in environment variables")
     
     try:
-        return create_client(
-            url,
-            key,
-            options=ClientOptions(
-                schema="public",
-                postgrest_client_timeout=10,
-                storage_client_timeout=10
-            )
-        )
+        return create_client(url, key)
     except Exception as e:
         print(f"Error initializing Supabase client: {str(e)}")
         raise 
