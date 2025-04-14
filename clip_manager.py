@@ -1,7 +1,7 @@
 import os
 import json
 import streamlit as st
-import paramiko
+import shutil
 from dotenv import load_dotenv
 from src.database.supabase_client import init_supabase
 from generate_video import generate_video, find_matching_clip
@@ -10,22 +10,15 @@ from generate_video import generate_video, find_matching_clip
 load_dotenv()
 
 def upload_to_server(local_path: str, remote_filename: str):
-    """Upload a file to the Linode server via SFTP."""
+    """Upload a file to the nginx videos directory."""
     try:
-        transport = paramiko.Transport(('172.236.1.244', 22))
-        transport.connect(
-            username='root',
-            password=os.getenv('LINODE_SERVER_PASSWORD')
-        )
+        # Create the videos directory if it doesn't exist
+        nginx_videos_dir = '/usr/share/nginx/html/videos'
+        os.makedirs(nginx_videos_dir, exist_ok=True)
         
-        sftp = paramiko.SFTPClient.from_transport(transport)
-        
-        # Upload to videos directory on Linode
-        remote_path = f'/var/www/html/videos/{remote_filename}'
-        sftp.put(local_path, remote_path)
-        
-        sftp.close()
-        transport.close()
+        # Copy the file to the nginx directory
+        remote_path = os.path.join(nginx_videos_dir, remote_filename)
+        shutil.copy2(local_path, remote_path)
         
         # Return both internal and external URLs
         return {
@@ -159,7 +152,7 @@ def main():
                             # Get file size
                             file_size = get_file_size(temp_path)
                             
-                            # Upload to Linode and get URLs
+                            # Upload to nginx and get URLs
                             urls = upload_to_server(temp_path, clip_filename)
                             
                             if urls:
