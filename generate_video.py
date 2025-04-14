@@ -104,13 +104,44 @@ def track_clip_usage(supabase, clip_id: str, song_id: str, segment_index: int):
         print(f"Error tracking clip usage: {str(e)}")
         return False
 
+def get_available_clips(temp_dir):
+    """Get a list of available clips from the nginx server"""
+    available_clips = []
+    base_url = "http://nginx/videos"
+    for i in range(100):  # Check first 100 possible clips
+        clip_name = f"clip_{i:03d}.mp4"
+        try:
+            response = requests.head(f"{base_url}/{clip_name}")
+            if response.status_code == 200:
+                available_clips.append(clip_name)
+        except:
+            continue
+    return available_clips
+
+def get_fallback_clip(text, available_clips, used_clips):
+    """Get a fallback clip when the preferred one isn't available"""
+    # Try to find a clip that hasn't been used recently
+    for clip in available_clips:
+        if clip not in used_clips[-5:]:  # Avoid using the same clip in last 5 segments
+            return clip
+    # If all clips have been used recently, just use the first available one
+    return available_clips[0] if available_clips else None
+
 def generate_video(song_id: str, transcription_data: list, progress_callback=None):
     try:
         temp_dir = "temp_clips"
         os.makedirs(temp_dir, exist_ok=True)
         clips = []
         current_batch = []
-        batch_size = 3  # Reduced batch size for stability
+        batch_size = 3
+        used_clips = []  # Track which clips have been used
+        
+        # Get list of available clips
+        print("\nChecking available clips...")
+        available_clips = get_available_clips(temp_dir)
+        if not available_clips:
+            raise ValueError("No clips available on the server")
+        print(f"Found {len(available_clips)} available clips")
         
         # Initialize Supabase client
         supabase = init_supabase()
@@ -125,12 +156,28 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
             print(f"Segment text: {segment['text']}\n")
             
             try:
-                clip = process_segment(segment, song_id, temp_dir, i, supabase)
+                clip = None
+                # First try to get the preferred clip
+                preferred_clip = process_segment(segment, song_id, temp_dir, i, supabase)
                 
-                # Validate clip before adding to batch
+                if preferred_clip is not None and hasattr(preferred_clip, 'get_frame'):
+                    clip = preferred_clip
+                else:
+                    # If preferred clip failed, try a fallback
+                    fallback_clip_name = get_fallback_clip(segment['text'], available_clips, used_clips)
+                    if fallback_clip_name:
+                        print(f"Using fallback clip: {fallback_clip_name}")
+                        clip_path = os.path.join(temp_dir, f"temp_clip_{i}.mp4")
+                        if download_clip(f"http://nginx/videos/{fallback_clip_name}", clip_path):
+                            try:
+                                clip = VideoFileClip(clip_path)
+                            except Exception as e:
+                                print(f"Error loading fallback clip: {str(e)}")
+                
                 if clip is not None and hasattr(clip, 'get_frame'):
                     print(f"Clip {i+1} loaded successfully")
                     current_batch.append(clip)
+                    used_clips.append(fallback_clip_name)  # Track which clip was used
                 else:
                     print(f"Warning: Invalid clip generated for segment {i+1}")
                     continue
