@@ -121,6 +121,9 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         os.makedirs(temp_dir, exist_ok=True)
         clips = []
         
+        # Initialize Supabase client
+        supabase = init_supabase()
+        
         total_segments = len(transcription_data)
         
         for i, segment in enumerate(transcription_data):
@@ -131,7 +134,7 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
             print(f"Segment text: {segment['text']}\n")
             
             try:
-                clip = process_segment(segment, song_id, temp_dir, i)
+                clip = process_segment(segment, song_id, temp_dir, i, supabase)
                 if clip:
                     clips.append(clip)
                     
@@ -182,7 +185,7 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         print(f"Error in generate_video: {str(e)}")
         raise
 
-def process_segment(segment, song_id, temp_dir, index):
+def process_segment(segment, song_id, temp_dir, index, supabase):
     print(f"Looking for clip matching text: '{segment['text']}'")
     
     try:
@@ -190,8 +193,11 @@ def process_segment(segment, song_id, temp_dir, index):
         clip_info = find_matching_clip(supabase, segment['text'], song_id)
         
         if clip_info:
-            # Get the correct URL from the clip info - prefer internal URL when running in Docker
-            clip_url = clip_info.get('internal_url') or clip_info.get('filepath')
+            # Get clip URL (prefer internal URL for Docker network)
+            clip_url = clip_info.get('internal_url')
+            if not clip_url:
+                clip_url = clip_info.get('filepath')  # Fallback to external URL
+            
             if not clip_url:
                 print(f"No valid URL found for clip: {clip_info}")
                 return None
@@ -199,32 +205,27 @@ def process_segment(segment, song_id, temp_dir, index):
             temp_clip_path = os.path.join(temp_dir, f"clip_{index:03d}.mp4")
             print(f"Temp clip path: {temp_clip_path}")
             
-            try:
-                # Download and add clip to sequence
-                if download_clip(clip_url, temp_clip_path):
-                    print(f"Loading clip into moviepy: {temp_clip_path}")
-                    print("Creating VideoFileClip object...")
-                    
-                    # Set audio to False if the clip doesn't need audio processing
-                    clip = VideoFileClip(temp_clip_path, audio=True)
-                    
-                    print(f"Clip loaded successfully. Duration: {clip.duration}s, Size: {clip.size}")
-                    print(f"Successfully added clip {index} to sequence\n")
-                    
-                    # Track clip usage
-                    track_clip_usage(supabase, clip_info['id'], song_id, index)
-                    
-                    return clip
-                else:
-                    print(f"Failed to download clip from {clip_url}")
-                    return None
-            except Exception as e:
-                print(f"Error processing clip: {str(e)}")
-                traceback.print_exc()  # Print full traceback
+            if download_clip(clip_url, temp_clip_path):
+                print(f"Loading clip into moviepy: {temp_clip_path}")
+                print("Creating VideoFileClip object...")
+                
+                # Set audio to False if the clip doesn't need audio processing
+                clip = VideoFileClip(temp_clip_path, audio=True)
+                
+                print(f"Clip loaded successfully. Duration: {clip.duration}s, Size: {clip.size}")
+                print(f"Successfully added clip {index} to sequence\n")
+                
+                # Track clip usage
+                track_clip_usage(supabase, clip_info['id'], song_id, index)
+                
+                return clip
+            else:
+                print(f"Failed to download clip from {clip_url}")
                 return None
         else:
             print(f"No clip found for segment {index}: {segment['text']}")
             return None
+            
     except Exception as e:
         print(f"Error processing segment: {str(e)}")
         return None
