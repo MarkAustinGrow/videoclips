@@ -35,33 +35,38 @@ def resize_clip(clip_path, target_size=TARGET_RESOLUTION):
         # Only resize if needed
         if original_size != target_size:
             print(f"Resizing clip from {original_size} to {target_size}")
-            resized_clip = clip.resize(width=target_size[0], height=target_size[1])
             
-            # Save to a temporary file
-            resized_path = f"{clip_path}_resized.mp4"
-            resized_clip.write_videofile(
-                resized_path,
-                codec='libx264',
-                audio_codec='aac',
-                temp_audiofile=f"{clip_path}_audio.m4a",
-                remove_temp=True
-            )
+            # Use ffmpeg directly to avoid PIL issues
+            temp_output = f"{clip_path}_temp.mp4"
+            ffmpeg_cmd = f"ffmpeg -i {clip_path} -vf scale={target_size[0]}:{target_size[1]} -c:v libx264 -c:a aac -y {temp_output}"
             
-            # Close clips
+            print(f"Running command: {ffmpeg_cmd}")
+            os.system(ffmpeg_cmd)
+            
+            # Close the clip
             clip.close()
-            resized_clip.close()
             
-            # Replace original with resized
-            os.remove(clip_path)
-            os.rename(resized_path, clip_path)
-            
-            return True, original_size
+            # Check if the resized file exists and has content
+            if os.path.exists(temp_output) and os.path.getsize(temp_output) > 0:
+                # Replace original with resized
+                os.remove(clip_path)
+                os.rename(temp_output, clip_path)
+                print(f"Successfully resized clip to {target_size}")
+                return True, original_size
+            else:
+                print(f"Failed to resize clip: output file not created or empty")
+                return False, original_size
         else:
             print(f"Clip already at target size {target_size}")
             clip.close()
             return False, original_size
     except Exception as e:
         print(f"Error resizing clip: {str(e)}")
+        try:
+            if 'clip' in locals() and clip is not None:
+                clip.close()
+        except:
+            pass
         return False, None
 
 def upload_to_server(local_path, remote_filename):

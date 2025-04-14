@@ -139,8 +139,8 @@ def standardize_clip_size(clip, target_size=(960, 960)):
         # Check if sizes are different
         if clip.size != target_size:
             try:
-                # Use basic MoviePy resize without any additional parameters
-                resized_clip = clip.resize(width=target_size[0], height=target_size[1])
+                # Use simpler resize method that doesn't rely on PIL
+                resized_clip = clip.resize(newsize=target_size)
                 print(f"Successfully resized clip from {clip.size} to {target_size}")
                 return resized_clip
             except Exception as e:
@@ -153,17 +153,7 @@ def standardize_clip_size(clip, target_size=(960, 960)):
 
 def process_image_with_pil(image):
     """Process image using PIL with updated resampling method"""
-    if isinstance(image, Image.Image):
-        try:
-            # Use LANCZOS resampling (replacement for deprecated ANTIALIAS)
-            return image.resize(image.size, resample=Image.LANCZOS)
-        except AttributeError:
-            # Fallback for older Pillow versions
-            try:
-                return image.resize(image.size, resample=Image.Resampling.LANCZOS)
-            except AttributeError:
-                # Last resort fallback
-                return image
+    # This function is kept for compatibility but we avoid using PIL directly
     return image
 
 def generate_video(song_id: str, transcription_data: list, progress_callback=None):
@@ -230,14 +220,55 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                         try:
                             # Validate all clips in batch before concatenating
                             valid_clips = [c for c in current_batch if c is not None and hasattr(c, 'get_frame')]
-                            if valid_clips:
-                                batch_video = concatenate_videoclips(valid_clips, method="compose")
-                                if batch_video is not None and hasattr(batch_video, 'get_frame'):
-                                    clips.append(batch_video)
-                                else:
-                                    print("Warning: Invalid batch video generated")
-                            else:
+                            
+                            if not valid_clips:
                                 print("Warning: No valid clips in current batch")
+                                current_batch = []
+                                gc.collect()
+                                continue
+                                
+                            # Ensure all clips have the same size before concatenating
+                            first_size = valid_clips[0].size
+                            uniform_clips = []
+                            
+                            for c in valid_clips:
+                                if c.size != first_size:
+                                    print(f"Resizing clip from {c.size} to {first_size} for batch consistency")
+                                    try:
+                                        # Use simpler resize method
+                                        resized = c.resize(newsize=first_size)
+                                        uniform_clips.append(resized)
+                                    except Exception as e:
+                                        print(f"Warning: Could not resize clip for batch ({str(e)}), skipping")
+                                        # Close the clip that couldn't be resized
+                                        try:
+                                            c.close()
+                                        except:
+                                            pass
+                                else:
+                                    uniform_clips.append(c)
+                            
+                            if not uniform_clips:
+                                print("Warning: No clips left after size normalization")
+                                # Clean up current batch
+                                for c in current_batch:
+                                    try:
+                                        if c is not None:
+                                            c.close()
+                                    except:
+                                        pass
+                                current_batch = []
+                                gc.collect()
+                                continue
+                                
+                            # Concatenate the uniform clips
+                            batch_video = concatenate_videoclips(uniform_clips, method="compose")
+                            
+                            if batch_video is not None and hasattr(batch_video, 'get_frame'):
+                                clips.append(batch_video)
+                                print(f"Successfully added batch of {len(uniform_clips)} clips")
+                            else:
+                                print("Warning: Invalid batch video generated")
                                 
                             # Close individual clips to free memory
                             for c in current_batch:
@@ -253,6 +284,7 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                             
                         except Exception as e:
                             print(f"Error processing batch: {str(e)}")
+                            traceback.print_exc()  # Print full traceback for debugging
                             # Clean up failed batch
                             for c in current_batch:
                                 try:
