@@ -17,7 +17,7 @@ services:
     image: nginx:alpine
     restart: unless-stopped
     volumes:
-      - /var/www/html/videos:/usr/share/nginx/html/videos
+      - nginx_videos:/usr/share/nginx/html/videos
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
     ports:
       - "80:80"
@@ -26,4 +26,6 @@ services:
 
 volumes:
   video_clips:
+    driver: local
+  nginx_videos:
     driver: local 
