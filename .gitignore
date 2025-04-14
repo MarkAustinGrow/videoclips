@@ -1,17 +1,32 @@
+# Environment variables
 .env
 .env.*
+!.env.example
+
+# Generated content
+generated_videos/
+temp_clips/
 __pycache__/
 *.pyc
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# System files
+.DS_Store
+Thumbs.db
+
 .pytest_cache/
 .coverage
 htmlcov/
 dist/
 build/
 *.egg-info/
-.idea/
-.vscode/
 node_modules/
 video_clips/
 *.mp4
-input/
-.DS_Store 
+input/ 
