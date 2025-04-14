@@ -302,32 +302,65 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         if not clips:
             raise ValueError("No valid clips were generated")
             
-        print("\nConcatenating final video...")
+        print("\nPreparing final video...")
         # Validate final clips before concatenating
         valid_final_clips = [c for c in clips if c is not None and hasattr(c, 'get_frame')]
         if not valid_final_clips:
             raise ValueError("No valid clips available for final video")
-            
-        # Set threads to 1 to avoid CPU overload
-        final_video = concatenate_videoclips(valid_final_clips, method="compose")
-        if final_video is None or not hasattr(final_video, 'get_frame'):
-            raise ValueError("Failed to generate final video")
         
+        # Write each batch to a temporary file
+        print(f"Writing {len(valid_final_clips)} batch clips to temporary files...")
+        batch_files = []
+        for i, batch in enumerate(valid_final_clips):
+            try:
+                batch_path = os.path.join(temp_dir, f"batch_{i:03d}.mp4")
+                print(f"Writing batch {i+1}/{len(valid_final_clips)} to {batch_path}")
+                
+                batch.write_videofile(
+                    batch_path,
+                    codec='libx264',
+                    audio_codec='aac',
+                    threads=1,
+                    fps=24,
+                    preset='medium',
+                    temp_audiofile=os.path.join(temp_dir, f"batch_{i:03d}_audio.m4a"),
+                    remove_temp=True
+                )
+                
+                # Verify the file was created successfully
+                if os.path.exists(batch_path) and os.path.getsize(batch_path) > 0:
+                    batch_files.append(batch_path)
+                    print(f"Successfully wrote batch {i+1}")
+                else:
+                    print(f"Warning: Failed to write batch {i+1}")
+            except Exception as e:
+                print(f"Error writing batch {i+1}: {str(e)}")
+                traceback.print_exc()
+        
+        if not batch_files:
+            raise ValueError("No batch files were successfully written")
+        
+        # Create a file list for ffmpeg
+        list_file = os.path.join(temp_dir, "file_list.txt")
+        with open(list_file, 'w') as f:
+            for file in batch_files:
+                f.write(f"file '{file}'\n")
+        
+        # Use ffmpeg to concatenate
         output_dir = "generated_videos"
         os.makedirs(output_dir, exist_ok=True)
         output_path = f"{output_dir}/generated_{song_id}.mp4"
         
-        print(f"\nWriting final video to {output_path}")
-        final_video.write_videofile(
-            output_path,
-            codec='libx264',
-            audio_codec='aac',
-            threads=1,
-            fps=24,
-            preset='medium',  # Balance between speed and quality
-            temp_audiofile=os.path.join(temp_dir, "temp-audio.m4a"),
-            remove_temp=True
-        )
+        print(f"\nConcatenating final video to {output_path} using ffmpeg...")
+        ffmpeg_cmd = f"ffmpeg -f concat -safe 0 -i {list_file} -c copy {output_path}"
+        print(f"Running command: {ffmpeg_cmd}")
+        os.system(ffmpeg_cmd)
+        
+        # Verify the output file was created
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise ValueError("Failed to generate final video with ffmpeg")
+            
+        print(f"Successfully generated video at {output_path}")
         
         # Clean up
         print("\nCleaning up...")
@@ -338,16 +371,14 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
             except Exception as e:
                 print(f"Warning: Error closing clip: {str(e)}")
         
-        if final_video is not None:
-            try:
-                final_video.close()
-            except Exception as e:
-                print(f"Warning: Error closing final video: {str(e)}")
-        
         # Clear temp directory
+        print("Removing temporary files...")
         for file in os.listdir(temp_dir):
             try:
-                os.remove(os.path.join(temp_dir, file))
+                file_path = os.path.join(temp_dir, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    print(f"Removed {file}")
             except Exception as e:
                 print(f"Error removing temp file {file}: {str(e)}")
         
