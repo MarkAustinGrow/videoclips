@@ -8,6 +8,7 @@ from datetime import datetime
 import shutil
 import traceback
 import gc
+from PIL import Image
 
 def download_clip(url: str, local_path: str) -> bool:
     """Download a clip from URL to local path."""
@@ -133,6 +134,12 @@ def standardize_clip_size(clip, target_size=(960, 960)):
         # Use bilinear interpolation for resizing
         return clip.resize(width=target_size[0], height=target_size[1])
     return clip
+
+def process_image_with_pil(image):
+    """Process image using PIL with updated resampling method"""
+    if isinstance(image, Image.Image):
+        return image.resize(image.size, resample=Image.Resampling.LANCZOS)
+    return image
 
 def generate_video(song_id: str, transcription_data: list, progress_callback=None):
     try:
