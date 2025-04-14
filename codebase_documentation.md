@@ -154,7 +154,8 @@ docker-compose -f docker-compose.prod.yml up -d
 - For each segment:
   1. Find matching clips
   2. Download and verify clips
-  3. Add to video sequence
+  3. Standardize clip sizes (960x960 or 1440x1440)
+  4. Add to video sequence
 - Concatenate clips
 - Write final video
 
@@ -175,6 +176,13 @@ docker-compose -f docker-compose.prod.yml up -d
 - Implement caching where appropriate
 - Monitor resource usage
 
+4. **Clip Standardization**
+- Maintain consistent clip resolutions (preferably 960x960)
+- Handle resize operations gracefully
+- Validate clip properties before processing
+- Test clips with different resolutions before deployment
+- Implement fallback mechanisms for resize failures
+
 ## Troubleshooting
 
 Common issues and solutions:
@@ -193,6 +201,13 @@ Common issues and solutions:
 - Verify Supabase connection
 - Check table schema matches
 - Monitor query performance
+
+4. **Clip Size Issues**
+- Different clip resolutions (960x960 vs 1440x1440) may cause concatenation problems
+- Resize operation failures should fall back to original size
+- MoviePy compatibility issues with PIL resizing methods
+- Memory usage spikes during resizing operations
+- Batch processing may fail with mixed resolutions
 
 ## Future Improvements
 
