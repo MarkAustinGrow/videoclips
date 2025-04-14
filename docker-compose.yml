@@ -5,6 +5,7 @@ services:
     volumes:
       - .:/app
       - nginx_videos:/usr/share/nginx/html/videos
+      - /tmp:/tmp  # Share host /tmp for better memory management
     env_file:
       - .env
     ports:
@@ -13,16 +14,16 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1.4G
-          cpus: '0.8'
+          memory: 1.6G
         reservations:
-          memory: 800M
-          cpus: '0.2'
-    restart: unless-stopped
+          memory: 512M
     environment:
       - MOVIEPY_THREADS=1
       - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
       - PYTHONUNBUFFERED=1
+      - MPLBACKEND=Agg
+    restart: unless-stopped
+    shm_size: '256mb'
 
   nginx:
     image: nginx:alpine

@@ -105,21 +105,12 @@ def track_clip_usage(supabase, clip_id: str, song_id: str, segment_index: int):
         return False
 
 def generate_video(song_id: str, transcription_data: list, progress_callback=None):
-    """
-    Generate a video from transcription data and clips.
-    
-    Args:
-        song_id: The ID of the song to generate video for
-        transcription_data: List of transcription segments
-        progress_callback: Optional callback function(current_segment, message) for progress updates
-    
-    Returns:
-        str: Path to the generated video file, or None if generation failed
-    """
     try:
         temp_dir = "temp_clips"
         os.makedirs(temp_dir, exist_ok=True)
         clips = []
+        current_batch = []
+        batch_size = 5  # Process 5 clips at a time
         
         # Initialize Supabase client
         supabase = init_supabase()
@@ -136,10 +127,22 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
             try:
                 clip = process_segment(segment, song_id, temp_dir, i, supabase)
                 if clip:
-                    clips.append(clip)
+                    current_batch.append(clip)
                     
-                # Garbage collection after each clip to manage memory
-                gc.collect()
+                # When batch is full or on last segment, concatenate and clear memory
+                if len(current_batch) >= batch_size or i == total_segments - 1:
+                    if current_batch:
+                        print(f"\nProcessing batch of {len(current_batch)} clips...")
+                        batch_video = concatenate_videoclips(current_batch, method="compose")
+                        clips.append(batch_video)
+                        
+                        # Close individual clips to free memory
+                        for c in current_batch:
+                            c.close()
+                        current_batch = []
+                        
+                        # Force garbage collection
+                        gc.collect()
                 
             except Exception as e:
                 print(f"Error processing segment {i+1}: {str(e)}")
@@ -148,7 +151,7 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         if not clips:
             raise ValueError("No valid clips were generated")
             
-        print("\nConcatenating clips...")
+        print("\nConcatenating final video...")
         # Set threads to 1 to avoid CPU overload
         final_video = concatenate_videoclips(clips, method="compose")
         
@@ -163,7 +166,9 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
             audio_codec='aac',
             threads=1,
             fps=24,
-            preset='medium'  # Balance between speed and quality
+            preset='medium',  # Balance between speed and quality
+            temp_audiofile=os.path.join(temp_dir, "temp-audio.m4a"),
+            remove_temp=True
         )
         
         # Clean up
