@@ -206,91 +206,45 @@ def main():
     with tab2:
         st.header("Generate Music Video")
         
-        # Get available songs
-        songs = fetch_songs(supabase)
-        if not songs:
-            st.warning("No songs found in database. Please upload some clips first.")
-            return
-            
-        # Song selection
+        st.write("Select a song to generate video for")
         selected_song = st.selectbox(
-            "Select a song to generate video for",
-            options=songs,
-            format_func=lambda x: x['title']
+            "Select Song",
+            options=list(song_options.keys()),
+            format_func=lambda x: song_options[x],
+            key="generate_video_song"
         )
         
         if st.button("Generate Video"):
-            if not selected_song:
-                st.error("Please select a song first")
-                return
-                
-            with st.spinner("Preparing to generate video..."):
-                # Get transcription data
-                transcription = get_transcription(supabase, selected_song['id'])
-                if not transcription:
-                    st.error("No transcription data found for this song")
-                    return
-                
-                # Check for missing clips first
-                missing_segments = []
-                for i, segment in enumerate(transcription):
-                    segment_text = segment.get('text', '').strip()
-                    if segment_text:
-                        clip_info = find_matching_clip(supabase, segment_text, selected_song['id'])
-                        if not clip_info:
-                            missing_segments.append((i, segment_text))
-                
-                if missing_segments:
-                    st.warning("⚠️ Missing clips detected!")
-                    st.write("The following segments don't have matching clips:")
-                    for i, text in missing_segments:
-                        st.write(f"🎬 Segment {i+1}: \"{text}\"")
-                    
-                    if st.button("Generate Video Anyway"):
-                        proceed_with_generation = True
-                    else:
-                        st.info("Please create clips for the missing segments first, or click 'Generate Video Anyway' to proceed with gaps.")
-                        return
-                
-                # Progress tracking
+            transcription_data = get_transcription(supabase, selected_song)
+            
+            if transcription_data:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                def update_progress(current_segment, message):
-                    # Update progress bar (0-100%)
-                    progress = (current_segment + 1) / len(transcription) * 100
-                    progress_bar.progress(int(progress))
+                def update_progress(message):
+                    # Update status message
                     status_text.text(message)
+                    
+                    # Try to extract progress from message if it contains segment info
+                    try:
+                        if "Processing segment" in message:
+                            current, total = map(int, message.split()[2].split('/'))
+                            progress = current / total
+                            progress_bar.progress(progress)
+                    except:
+                        pass
                 
                 try:
-                    # Generate video with progress tracking
-                    output_path = generate_video(
-                        selected_song['id'],
-                        transcription,
-                        progress_callback=update_progress
-                    )
-                    
-                    if output_path and os.path.exists(output_path):
-                        # Show success and video player
-                        st.success("Video generated successfully!")
+                    output_path = generate_video(selected_song, transcription_data, progress_callback=update_progress)
+                    if output_path:
+                        st.success(f"Video generated successfully!")
                         st.video(output_path)
-                        
-                        # Download button
-                        with open(output_path, 'rb') as f:
-                            st.download_button(
-                                "Download Video",
-                                f,
-                                file_name=f"generated_{selected_song['title']}.mp4",
-                                mime="video/mp4"
-                            )
                     else:
-                        st.error("Failed to generate video. Check logs for details.")
+                        st.error("Failed to generate video")
                 except Exception as e:
                     st.error(f"Error during video generation: {str(e)}")
-                finally:
-                    # Clear progress indicators
-                    progress_bar.empty()
-                    status_text.empty()
+            else:
+                st.error("No transcription data found for this song")
 
 if __name__ == "__main__":
     main() 
