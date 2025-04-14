@@ -132,12 +132,12 @@ def standardize_clip_size(clip, target_size=(960, 960)):
     """Resize clip to standard dimensions if needed"""
     if clip.size != target_size:
         try:
-            # Use MoviePy's resize method directly with target dimensions
-            resized_clip = clip.resize(width=target_size[0], height=target_size[1])
+            # Use newer PIL constants for resampling
+            resample_method = getattr(Image, "Resampling", Image).LANCZOS
+            resized_clip = clip.resize(width=target_size[0], height=target_size[1], resample=resample_method)
             return resized_clip
         except Exception as e:
-            print(f"Error resizing clip: {str(e)}")
-            # If resize fails, return original clip
+            print(f"Warning: Could not resize clip ({str(e)}), using original size {clip.size}")
             return clip
     return clip
 
