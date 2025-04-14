@@ -302,9 +302,9 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         # Skip batch processing and directly use the original clip files
         print("\nPreparing final video...")
         
-        # Create a directory for the original clips
-        original_clips_dir = os.path.join(temp_dir, "original_clips")
-        os.makedirs(original_clips_dir, exist_ok=True)
+        # Create a debug directory to preserve files for debugging
+        debug_dir = "debug_files"
+        os.makedirs(debug_dir, exist_ok=True)
         
         # Collect all the original clip files
         print("Collecting original clip files...")
@@ -315,16 +315,24 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
             if file.endswith(".mp4") and not file.startswith("batch_") and not file.startswith("temp_"):
                 clip_path = os.path.join(temp_dir, file)
                 if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
+                    # Copy to debug directory for inspection
+                    debug_path = os.path.join(debug_dir, file)
+                    shutil.copy2(clip_path, debug_path)
+                    
                     clip_files.append(clip_path)
-                    print(f"Added clip file: {file}")
+                    print(f"Added clip file: {file} (size: {os.path.getsize(clip_path)} bytes)")
         
         # Also check for temp_clip files that might have been created for fallback clips
         for file in os.listdir(temp_dir):
             if file.startswith("temp_clip_") and file.endswith(".mp4"):
                 clip_path = os.path.join(temp_dir, file)
                 if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
+                    # Copy to debug directory for inspection
+                    debug_path = os.path.join(debug_dir, f"fallback_{file}")
+                    shutil.copy2(clip_path, debug_path)
+                    
                     clip_files.append(clip_path)
-                    print(f"Added fallback clip file: {file}")
+                    print(f"Added fallback clip file: {file} (size: {os.path.getsize(clip_path)} bytes)")
         
         if not clip_files:
             raise ValueError("No clip files were found in the temp directory")
@@ -332,56 +340,170 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         # Sort the clip files by their numeric index to maintain order
         clip_files.sort(key=lambda x: int(os.path.basename(x).split('_')[-1].split('.')[0]) if '_' in os.path.basename(x) else 0)
         
-        # Create a file list for ffmpeg
+        # Create a file list for ffmpeg using relative paths
         list_file = os.path.join(temp_dir, "file_list.txt")
         with open(list_file, 'w') as f:
             for file in clip_files:
-                f.write(f"file '{os.path.abspath(file)}'\n")
+                # Use relative paths with forward slashes for ffmpeg
+                rel_path = os.path.relpath(file, os.path.dirname(list_file))
+                rel_path = rel_path.replace('\\', '/')  # Ensure forward slashes for ffmpeg
+                f.write(f"file '{rel_path}'\n")
+        
+        # Copy the file list to debug directory
+        debug_list_file = os.path.join(debug_dir, "file_list.txt")
+        shutil.copy2(list_file, debug_list_file)
+        
+        # Log the content of the file list
+        print("\nContents of file_list.txt:")
+        with open(list_file, 'r') as f:
+            print(f.read())
         
         # Use ffmpeg to concatenate
         output_dir = "generated_videos"
         os.makedirs(output_dir, exist_ok=True)
         output_path = f"{output_dir}/generated_{song_id}.mp4"
         
+        # First try: Use concat demuxer with relative paths
         print(f"\nConcatenating final video to {output_path} using ffmpeg...")
-        ffmpeg_cmd = f"ffmpeg -f concat -safe 0 -i {list_file} -c copy {output_path}"
+        ffmpeg_cmd = f"ffmpeg -f concat -safe 0 -i {list_file} -c copy {output_path} -y"
         print(f"Running command: {ffmpeg_cmd}")
-        os.system(ffmpeg_cmd)
         
-        # Verify the output file was created
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            # Try an alternative approach with filter_complex if concat demuxer fails
-            print("Concat demuxer failed, trying filter_complex approach...")
-            inputs = " ".join([f"-i {file}" for file in clip_files])
-            filter_complex = f"\"concat=n={len(clip_files)}:v=1:a=0\""
-            alt_ffmpeg_cmd = f"ffmpeg {inputs} -filter_complex {filter_complex} -c:v libx264 {output_path}"
-            print(f"Running command: {alt_ffmpeg_cmd}")
-            os.system(alt_ffmpeg_cmd)
+        # Use subprocess to capture output
+        import subprocess
+        try:
+            result = subprocess.run(
+                ffmpeg_cmd, 
+                shell=True, 
+                check=True,
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            print("ffmpeg output:")
+            print(result.stdout)
+            print(result.stderr)
+        except subprocess.CalledProcessError as e:
+            print(f"ffmpeg error (exit code {e.returncode}):")
+            print(e.stdout)
+            print(e.stderr)
+            print("First approach failed, trying alternative...")
+        
+        # Verify the output file was created and has reasonable size
+        if not os.path.exists(output_path) or os.path.getsize(output_path) < 10000:  # Less than 10KB is suspicious
+            print(f"Warning: Output file is too small ({os.path.getsize(output_path) if os.path.exists(output_path) else 0} bytes)")
             
-            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-                raise ValueError("Failed to generate final video with ffmpeg")
-        
-        print(f"Successfully generated video at {output_path}")
-        
-        # Clean up
-        print("\nCleaning up...")
-        for clip in clips:
+            # Second try: Use concat filter with absolute paths
+            print("Trying alternative approach with filter_complex...")
+            
+            # Create a temporary script to run ffmpeg
+            script_path = os.path.join(debug_dir, "ffmpeg_script.sh")
+            with open(script_path, 'w') as f:
+                f.write("#!/bin/bash\n")
+                
+                # Add input files
+                for file in clip_files:
+                    f.write(f"INPUT_FILES=\"$INPUT_FILES -i '{file}'\"\n")
+                
+                # Create filter complex string
+                filter_parts = []
+                for i in range(len(clip_files)):
+                    filter_parts.append(f"[{i}:v]")
+                filter_complex = "".join(filter_parts) + f"concat=n={len(clip_files)}:v=1:a=0[outv]"
+                
+                # Add ffmpeg command
+                f.write(f"ffmpeg $INPUT_FILES -filter_complex \"{filter_complex}\" -map \"[outv]\" -c:v libx264 -preset medium -crf 23 {output_path} -y\n")
+            
+            # Make script executable
+            os.chmod(script_path, 0o755)
+            
+            # Run the script
             try:
-                if clip is not None:
-                    clip.close()
-            except Exception as e:
-                print(f"Warning: Error closing clip: {str(e)}")
+                result = subprocess.run(
+                    script_path, 
+                    shell=True, 
+                    check=True,
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                print("ffmpeg output (second attempt):")
+                print(result.stdout)
+                print(result.stderr)
+            except subprocess.CalledProcessError as e:
+                print(f"ffmpeg error in second attempt (exit code {e.returncode}):")
+                print(e.stdout)
+                print(e.stderr)
+                
+                # Third try: Process each clip individually and concatenate
+                print("Trying third approach: process each clip individually...")
+                
+                # Create a directory for processed clips
+                processed_dir = os.path.join(debug_dir, "processed_clips")
+                os.makedirs(processed_dir, exist_ok=True)
+                
+                # Process each clip to ensure they have the same codec and format
+                processed_files = []
+                for i, file in enumerate(clip_files):
+                    output_file = os.path.join(processed_dir, f"processed_{i:03d}.mp4")
+                    process_cmd = f"ffmpeg -i {file} -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p -vf scale=960:960 {output_file} -y"
+                    
+                    try:
+                        subprocess.run(process_cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                            processed_files.append(output_file)
+                    except subprocess.CalledProcessError:
+                        print(f"Failed to process clip {file}")
+                
+                if processed_files:
+                    # Create a new file list
+                    processed_list = os.path.join(processed_dir, "processed_list.txt")
+                    with open(processed_list, 'w') as f:
+                        for file in processed_files:
+                            rel_path = os.path.relpath(file, os.path.dirname(processed_list))
+                            rel_path = rel_path.replace('\\', '/')
+                            f.write(f"file '{rel_path}'\n")
+                    
+                    # Try concat demuxer again with processed files
+                    final_cmd = f"ffmpeg -f concat -safe 0 -i {processed_list} -c copy {output_path} -y"
+                    subprocess.run(final_cmd, shell=True, check=True)
+            
+            # Final check
+            if not os.path.exists(output_path) or os.path.getsize(output_path) < 10000:
+                # If all approaches fail, raise an error
+                error_msg = f"Failed to generate final video. Output file size: {os.path.getsize(output_path) if os.path.exists(output_path) else 0} bytes"
+                print(error_msg)
+                raise ValueError(error_msg)
         
-        # Clear temp directory
-        print("Removing temporary files...")
-        for file in os.listdir(temp_dir):
-            try:
-                file_path = os.path.join(temp_dir, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-                    print(f"Removed {file}")
-            except Exception as e:
-                print(f"Error removing temp file {file}: {str(e)}")
+        # Log the final file size
+        file_size = os.path.getsize(output_path)
+        print(f"Successfully generated video at {output_path} (size: {file_size} bytes)")
+        
+        if file_size < 100000:  # Less than 100KB is still suspicious for a video
+            print(f"Warning: Final video file is unusually small ({file_size} bytes). It may not play correctly.")
+        
+        # Clean up only if successful and file size is reasonable
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 100000:
+            print("\nCleaning up...")
+            for clip in clips:
+                try:
+                    if clip is not None:
+                        clip.close()
+                except Exception as e:
+                    print(f"Warning: Error closing clip: {str(e)}")
+            
+            # Clear temp directory but keep debug files
+            print("Removing temporary files...")
+            for file in os.listdir(temp_dir):
+                try:
+                    file_path = os.path.join(temp_dir, file)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                        print(f"Removed {file}")
+                except Exception as e:
+                    print(f"Error removing temp file {file}: {str(e)}")
+        else:
+            print("\nSkipping cleanup to preserve files for debugging")
+            print(f"Debug files are available in the '{debug_dir}' directory")
         
         return output_path
         
