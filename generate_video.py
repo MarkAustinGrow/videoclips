@@ -110,7 +110,7 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         os.makedirs(temp_dir, exist_ok=True)
         clips = []
         current_batch = []
-        batch_size = 5  # Process 5 clips at a time
+        batch_size = 3  # Reduced batch size for stability
         
         # Initialize Supabase client
         supabase = init_supabase()
@@ -126,23 +126,54 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
             
             try:
                 clip = process_segment(segment, song_id, temp_dir, i, supabase)
-                if clip:
+                
+                # Validate clip before adding to batch
+                if clip is not None and hasattr(clip, 'get_frame'):
+                    print(f"Clip {i+1} loaded successfully")
                     current_batch.append(clip)
+                else:
+                    print(f"Warning: Invalid clip generated for segment {i+1}")
+                    continue
                     
                 # When batch is full or on last segment, concatenate and clear memory
                 if len(current_batch) >= batch_size or i == total_segments - 1:
                     if current_batch:
                         print(f"\nProcessing batch of {len(current_batch)} clips...")
-                        batch_video = concatenate_videoclips(current_batch, method="compose")
-                        clips.append(batch_video)
-                        
-                        # Close individual clips to free memory
-                        for c in current_batch:
-                            c.close()
-                        current_batch = []
-                        
-                        # Force garbage collection
-                        gc.collect()
+                        try:
+                            # Validate all clips in batch before concatenating
+                            valid_clips = [c for c in current_batch if c is not None and hasattr(c, 'get_frame')]
+                            if valid_clips:
+                                batch_video = concatenate_videoclips(valid_clips, method="compose")
+                                if batch_video is not None and hasattr(batch_video, 'get_frame'):
+                                    clips.append(batch_video)
+                                else:
+                                    print("Warning: Invalid batch video generated")
+                            else:
+                                print("Warning: No valid clips in current batch")
+                                
+                            # Close individual clips to free memory
+                            for c in current_batch:
+                                try:
+                                    if c is not None:
+                                        c.close()
+                                except Exception as e:
+                                    print(f"Warning: Error closing clip: {str(e)}")
+                            
+                            current_batch = []
+                            # Force garbage collection
+                            gc.collect()
+                            
+                        except Exception as e:
+                            print(f"Error processing batch: {str(e)}")
+                            # Clean up failed batch
+                            for c in current_batch:
+                                try:
+                                    if c is not None:
+                                        c.close()
+                                except:
+                                    pass
+                            current_batch = []
+                            gc.collect()
                 
             except Exception as e:
                 print(f"Error processing segment {i+1}: {str(e)}")
@@ -152,8 +183,15 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
             raise ValueError("No valid clips were generated")
             
         print("\nConcatenating final video...")
+        # Validate final clips before concatenating
+        valid_final_clips = [c for c in clips if c is not None and hasattr(c, 'get_frame')]
+        if not valid_final_clips:
+            raise ValueError("No valid clips available for final video")
+            
         # Set threads to 1 to avoid CPU overload
-        final_video = concatenate_videoclips(clips, method="compose")
+        final_video = concatenate_videoclips(valid_final_clips, method="compose")
+        if final_video is None or not hasattr(final_video, 'get_frame'):
+            raise ValueError("Failed to generate final video")
         
         output_dir = "generated_videos"
         os.makedirs(output_dir, exist_ok=True)
@@ -174,8 +212,17 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         # Clean up
         print("\nCleaning up...")
         for clip in clips:
-            clip.close()
-        final_video.close()
+            try:
+                if clip is not None:
+                    clip.close()
+            except Exception as e:
+                print(f"Warning: Error closing clip: {str(e)}")
+        
+        if final_video is not None:
+            try:
+                final_video.close()
+            except Exception as e:
+                print(f"Warning: Error closing final video: {str(e)}")
         
         # Clear temp directory
         for file in os.listdir(temp_dir):
@@ -188,6 +235,14 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         
     except Exception as e:
         print(f"Error in generate_video: {str(e)}")
+        # Ensure cleanup on error
+        try:
+            for clip in clips:
+                if clip is not None:
+                    clip.close()
+        except:
+            pass
+        gc.collect()
         raise
 
 def process_segment(segment, song_id, temp_dir, index, supabase):
