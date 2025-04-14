@@ -151,8 +151,8 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                 clip_info = find_matching_clip(supabase, segment_text, song_id)
                 
                 if clip_info:
-                    # Get the correct URL from the clip info
-                    clip_url = clip_info.get('filepath') or clip_info.get('public_url')
+                    # Get the correct URL from the clip info - prefer internal URL when running in Docker
+                    clip_url = clip_info.get('internal_url') or clip_info.get('filepath')
                     if not clip_url:
                         print(f"No valid URL found for clip: {clip_info}")
                         failed_clips += 1
@@ -183,6 +183,7 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                                 
                                 video_sequence.append(clip)
                                 print(f"Successfully added clip {len(video_sequence)} to sequence")
+                                successful_clips += 1
                                 
                                 # Track clip usage
                                 track_clip_usage(supabase, clip_info['id'], song_id, i)
