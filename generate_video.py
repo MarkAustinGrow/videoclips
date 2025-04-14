@@ -131,8 +131,14 @@ def get_fallback_clip(text, available_clips, used_clips):
 def standardize_clip_size(clip, target_size=(960, 960)):
     """Resize clip to standard dimensions if needed"""
     if clip.size != target_size:
-        # Use bilinear interpolation for resizing
-        return clip.resize(width=target_size[0], height=target_size[1])
+        try:
+            # Use MoviePy's resize method directly with target dimensions
+            resized_clip = clip.resize(width=target_size[0], height=target_size[1])
+            return resized_clip
+        except Exception as e:
+            print(f"Error resizing clip: {str(e)}")
+            # If resize fails, return original clip
+            return clip
     return clip
 
 def process_image_with_pil(image):
