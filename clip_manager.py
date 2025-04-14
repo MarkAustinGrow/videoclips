@@ -2,9 +2,11 @@ import os
 import json
 import streamlit as st
 import shutil
+import tempfile
 from dotenv import load_dotenv
 from src.database.supabase_client import init_supabase
 from generate_video import generate_video, find_matching_clip
+from moviepy.editor import VideoFileClip
 
 # Load environment variables
 load_dotenv()
@@ -28,6 +30,60 @@ def upload_to_server(local_path: str, remote_filename: str):
     except Exception as e:
         st.error(f"Upload failed: {str(e)}")
         return None
+
+def check_and_standardize_resolution(clip_file, target_resolution=(960, 960)):
+    """
+    Check clip resolution and resize if needed.
+    Returns: (temp_path, original_resolution, was_resized)
+    """
+    # Save uploaded file to a temporary location
+    temp_fd, temp_path = tempfile.mkstemp(suffix='.mp4')
+    os.close(temp_fd)
+    
+    with open(temp_path, "wb") as f:
+        f.write(clip_file.getvalue())
+    
+    # Check resolution
+    clip = VideoFileClip(temp_path)
+    original_resolution = clip.size
+    
+    # If resolution doesn't match target, resize
+    if original_resolution != target_resolution:
+        st.warning(f"Resizing clip from {original_resolution} to {target_resolution}")
+        
+        try:
+            # Create a new resized clip
+            resized_clip = clip.resize(width=target_resolution[0], height=target_resolution[1])
+            
+            # Close original clip
+            clip.close()
+            
+            # Save resized clip
+            resized_path = temp_path + "_resized.mp4"
+            resized_clip.write_videofile(
+                resized_path,
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile=temp_path + "_audio.m4a",
+                remove_temp=True
+            )
+            
+            # Close resized clip
+            resized_clip.close()
+            
+            # Replace original with resized
+            os.remove(temp_path)
+            os.rename(resized_path, temp_path)
+            
+            return temp_path, original_resolution, True
+        except Exception as e:
+            st.error(f"Error resizing clip: {str(e)}")
+            clip.close()
+            return temp_path, original_resolution, False
+    
+    # Close clip to free memory
+    clip.close()
+    return temp_path, original_resolution, False
 
 def get_file_size(file_path: str) -> int:
     """Get file size in bytes."""
@@ -141,15 +197,16 @@ def main():
                         )
                         
                         if st.button("Upload Clip"):
-                            # Save clip file temporarily
+                            # Check and standardize resolution
                             clip_filename = f"clip_{segment_index:03d}.mp4"
-                            temp_path = f"video_clips/{clip_filename}"
                             os.makedirs("video_clips", exist_ok=True)
                             
-                            with open(temp_path, "wb") as f:
-                                f.write(clip_file.getvalue())
+                            # Process the uploaded clip
+                            temp_path, original_resolution, was_resized = check_and_standardize_resolution(
+                                clip_file, target_resolution=(960, 960)
+                            )
                             
-                            # Get file size
+                            # Get file size after potential resize
                             file_size = get_file_size(temp_path)
                             
                             # Upload to nginx and get URLs
@@ -170,9 +227,16 @@ def main():
                                         'scene_tags': scene_tags.split(','),
                                         'source_text': selected_segment['text'],
                                         'manual_description': manual_description,
-                                        'filesize': file_size
+                                        'filesize': file_size,
+                                        'width': 960,  # Add resolution info
+                                        'height': 960,  # Add resolution info
+                                        'original_resolution': f"{original_resolution[0]}x{original_resolution[1]}"  # Store original resolution
                                     }).execute()
-                                    st.success(f"Uploaded clip {segment_index} with metadata")
+                                    
+                                    if was_resized:
+                                        st.success(f"Uploaded clip {segment_index} with metadata (resized from {original_resolution[0]}x{original_resolution[1]} to 960x960)")
+                                    else:
+                                        st.success(f"Uploaded clip {segment_index} with metadata")
                                     
                                     # Clean up temporary file
                                     os.remove(temp_path)
@@ -247,4 +311,4 @@ def main():
                 st.error("No transcription data found for this song")
 
 if __name__ == "__main__":
-    main() 
+    main()
