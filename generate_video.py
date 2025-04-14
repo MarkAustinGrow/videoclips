@@ -156,7 +156,19 @@ def process_image_with_pil(image):
     # This function is kept for compatibility but we avoid using PIL directly
     return image
 
-def generate_video(song_id: str, transcription_data: list, progress_callback=None):
+def generate_video(song_id: str, transcription_data: list, progress_callback=None, add_audio=True):
+    """
+    Generate a video from clips based on transcription data.
+    
+    Args:
+        song_id: The ID of the song
+        transcription_data: List of transcription segments
+        progress_callback: Optional callback function for progress updates
+        add_audio: Whether to add the song audio to the video (default: True)
+    
+    Returns:
+        Path to the generated video file
+    """
     try:
         temp_dir = "temp_clips"
         os.makedirs(temp_dir, exist_ok=True)
@@ -358,6 +370,31 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         with open(list_file, 'r') as f:
             print(f.read())
         
+        # Check if we should add audio
+        audio_path = None
+        if add_audio:
+            try:
+                # Get song details including audio_url
+                print("\nRetrieving song audio...")
+                song_response = supabase.table('songs').select('*').eq('id', song_id).execute()
+                song_data = song_response.data[0] if song_response.data else None
+                
+                if song_data and song_data.get('audio_url'):
+                    audio_url = song_data['audio_url']
+                    audio_path = os.path.join(debug_dir, f"audio_{song_id}.mp3")
+                    
+                    # Download audio file
+                    if download_clip(audio_url, audio_path):
+                        print(f"Successfully downloaded audio: {audio_path}")
+                    else:
+                        print(f"Failed to download audio from {audio_url}")
+                        audio_path = None
+                else:
+                    print("No audio URL found for this song")
+            except Exception as e:
+                print(f"Error retrieving or downloading audio: {str(e)}")
+                audio_path = None
+        
         # Use ffmpeg to concatenate
         output_dir = "generated_videos"
         os.makedirs(output_dir, exist_ok=True)
@@ -365,8 +402,15 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         
         # First try: Use concat demuxer with relative paths
         print(f"\nConcatenating final video to {output_path} using ffmpeg...")
-        ffmpeg_cmd = f"ffmpeg -f concat -safe 0 -i {list_file} -c copy {output_path} -y"
-        print(f"Running command: {ffmpeg_cmd}")
+        
+        if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+            # Add audio to the video
+            ffmpeg_cmd = f"ffmpeg -f concat -safe 0 -i {list_file} -i {audio_path} -c:v copy -c:a aac -map 0:v -map 1:a {output_path} -y"
+            print(f"Running command with audio: {ffmpeg_cmd}")
+        else:
+            # No audio, just concatenate video
+            ffmpeg_cmd = f"ffmpeg -f concat -safe 0 -i {list_file} -c copy {output_path} -y"
+            print(f"Running command without audio: {ffmpeg_cmd}")
         
         # Use subprocess to capture output
         import subprocess
@@ -404,14 +448,19 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                 for file in clip_files:
                     f.write(f"INPUT_FILES=\"$INPUT_FILES -i '{file}'\"\n")
                 
-                # Create filter complex string
+                # Create filter complex string for video
                 filter_parts = []
                 for i in range(len(clip_files)):
                     filter_parts.append(f"[{i}:v]")
                 filter_complex = "".join(filter_parts) + f"concat=n={len(clip_files)}:v=1:a=0[outv]"
                 
                 # Add ffmpeg command
-                f.write(f"ffmpeg $INPUT_FILES -filter_complex \"{filter_complex}\" -map \"[outv]\" -c:v libx264 -preset medium -crf 23 {output_path} -y\n")
+                if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                    # Add audio input and mapping
+                    f.write(f"ffmpeg $INPUT_FILES -i '{audio_path}' -filter_complex \"{filter_complex}\" -map \"[outv]\" -map {len(clip_files)}:a -c:v libx264 -c:a aac -preset medium -crf 23 {output_path} -y\n")
+                else:
+                    # Video only
+                    f.write(f"ffmpeg $INPUT_FILES -filter_complex \"{filter_complex}\" -map \"[outv]\" -c:v libx264 -preset medium -crf 23 {output_path} -y\n")
             
             # Make script executable
             os.chmod(script_path, 0o755)
@@ -464,7 +513,13 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                             f.write(f"file '{rel_path}'\n")
                     
                     # Try concat demuxer again with processed files
-                    final_cmd = f"ffmpeg -f concat -safe 0 -i {processed_list} -c copy {output_path} -y"
+                    if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                        # With audio
+                        final_cmd = f"ffmpeg -f concat -safe 0 -i {processed_list} -i {audio_path} -c:v copy -c:a aac -map 0:v -map 1:a {output_path} -y"
+                    else:
+                        # Without audio
+                        final_cmd = f"ffmpeg -f concat -safe 0 -i {processed_list} -c copy {output_path} -y"
+                    
                     subprocess.run(final_cmd, shell=True, check=True)
             
             # Final check
