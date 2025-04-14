@@ -5,6 +5,7 @@ services:
     volumes:
       - .:/app
       - nginx_videos:/usr/share/nginx/html/videos
+      - generated_videos:/app/generated_videos
       - /tmp:/tmp  # Share host /tmp for better memory management
     env_file:
       - .env
@@ -30,6 +31,7 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
       - nginx_videos:/usr/share/nginx/html/videos
+      - generated_videos:/usr/share/nginx/html/generated_videos
     ports:
       - "80:80"
     depends_on:
@@ -44,3 +46,4 @@ services:
 
 volumes:
   nginx_videos:
+  generated_videos:
