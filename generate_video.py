@@ -299,52 +299,44 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                 print(f"Error processing segment {i+1}: {str(e)}")
                 continue
         
-        if not clips:
-            raise ValueError("No valid clips were generated")
-            
+        # Skip batch processing and directly use the original clip files
         print("\nPreparing final video...")
-        # Validate final clips before concatenating
-        valid_final_clips = [c for c in clips if c is not None and hasattr(c, 'get_frame')]
-        if not valid_final_clips:
-            raise ValueError("No valid clips available for final video")
         
-        # Write each batch to a temporary file
-        print(f"Writing {len(valid_final_clips)} batch clips to temporary files...")
-        batch_files = []
-        for i, batch in enumerate(valid_final_clips):
-            try:
-                batch_path = os.path.join(temp_dir, f"batch_{i:03d}.mp4")
-                print(f"Writing batch {i+1}/{len(valid_final_clips)} to {batch_path}")
-                
-                batch.write_videofile(
-                    batch_path,
-                    codec='libx264',
-                    audio_codec='aac',
-                    threads=1,
-                    fps=24,
-                    preset='medium',
-                    temp_audiofile=os.path.join(temp_dir, f"batch_{i:03d}_audio.m4a"),
-                    remove_temp=True
-                )
-                
-                # Verify the file was created successfully
-                if os.path.exists(batch_path) and os.path.getsize(batch_path) > 0:
-                    batch_files.append(batch_path)
-                    print(f"Successfully wrote batch {i+1}")
-                else:
-                    print(f"Warning: Failed to write batch {i+1}")
-            except Exception as e:
-                print(f"Error writing batch {i+1}: {str(e)}")
-                traceback.print_exc()
+        # Create a directory for the original clips
+        original_clips_dir = os.path.join(temp_dir, "original_clips")
+        os.makedirs(original_clips_dir, exist_ok=True)
         
-        if not batch_files:
-            raise ValueError("No batch files were successfully written")
+        # Collect all the original clip files
+        print("Collecting original clip files...")
+        clip_files = []
+        
+        # Get all downloaded clip files from the temp directory
+        for file in os.listdir(temp_dir):
+            if file.endswith(".mp4") and not file.startswith("batch_") and not file.startswith("temp_"):
+                clip_path = os.path.join(temp_dir, file)
+                if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
+                    clip_files.append(clip_path)
+                    print(f"Added clip file: {file}")
+        
+        # Also check for temp_clip files that might have been created for fallback clips
+        for file in os.listdir(temp_dir):
+            if file.startswith("temp_clip_") and file.endswith(".mp4"):
+                clip_path = os.path.join(temp_dir, file)
+                if os.path.exists(clip_path) and os.path.getsize(clip_path) > 0:
+                    clip_files.append(clip_path)
+                    print(f"Added fallback clip file: {file}")
+        
+        if not clip_files:
+            raise ValueError("No clip files were found in the temp directory")
+        
+        # Sort the clip files by their numeric index to maintain order
+        clip_files.sort(key=lambda x: int(os.path.basename(x).split('_')[-1].split('.')[0]) if '_' in os.path.basename(x) else 0)
         
         # Create a file list for ffmpeg
         list_file = os.path.join(temp_dir, "file_list.txt")
         with open(list_file, 'w') as f:
-            for file in batch_files:
-                f.write(f"file '{file}'\n")
+            for file in clip_files:
+                f.write(f"file '{os.path.abspath(file)}'\n")
         
         # Use ffmpeg to concatenate
         output_dir = "generated_videos"
@@ -358,8 +350,17 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         
         # Verify the output file was created
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            raise ValueError("Failed to generate final video with ffmpeg")
+            # Try an alternative approach with filter_complex if concat demuxer fails
+            print("Concat demuxer failed, trying filter_complex approach...")
+            inputs = " ".join([f"-i {file}" for file in clip_files])
+            filter_complex = f"\"concat=n={len(clip_files)}:v=1:a=0\""
+            alt_ffmpeg_cmd = f"ffmpeg {inputs} -filter_complex {filter_complex} -c:v libx264 {output_path}"
+            print(f"Running command: {alt_ffmpeg_cmd}")
+            os.system(alt_ffmpeg_cmd)
             
+            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                raise ValueError("Failed to generate final video with ffmpeg")
+        
         print(f"Successfully generated video at {output_path}")
         
         # Clean up
