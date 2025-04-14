@@ -10,6 +10,19 @@ services:
     ports:
       - "8501:8501"
     command: ["streamlit", "run", "clip_manager.py", "--server.address=0.0.0.0"]
+    deploy:
+      resources:
+        limits:
+          memory: 1.4G
+          cpus: '0.8'
+        reservations:
+          memory: 800M
+          cpus: '0.2'
+    restart: unless-stopped
+    environment:
+      - MOVIEPY_THREADS=1
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - PYTHONUNBUFFERED=1
 
   nginx:
     image: nginx:alpine
@@ -20,6 +33,13 @@ services:
       - "80:80"
     depends_on:
       - app
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    restart: unless-stopped
 
 volumes:
   nginx_videos:
