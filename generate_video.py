@@ -130,21 +130,40 @@ def get_fallback_clip(text, available_clips, used_clips):
 
 def standardize_clip_size(clip, target_size=(960, 960)):
     """Resize clip to standard dimensions if needed"""
-    if clip.size != target_size:
-        try:
-            # Use basic MoviePy resize without any additional parameters
-            resized_clip = clip.resize(width=target_size[0], height=target_size[1])
-            print(f"Successfully resized clip from {clip.size} to {target_size}")
-            return resized_clip
-        except Exception as e:
-            print(f"Warning: Could not resize clip ({str(e)}), using original size {clip.size}")
-            return clip
-    return clip
+    # Check if clip is None
+    if clip is None:
+        print("Warning: Cannot resize None clip")
+        return None
+        
+    try:
+        # Check if sizes are different
+        if clip.size != target_size:
+            try:
+                # Use basic MoviePy resize without any additional parameters
+                resized_clip = clip.resize(width=target_size[0], height=target_size[1])
+                print(f"Successfully resized clip from {clip.size} to {target_size}")
+                return resized_clip
+            except Exception as e:
+                print(f"Warning: Could not resize clip ({str(e)}), using original size {clip.size}")
+                return clip  # Return original clip if resize fails
+        return clip  # Return original clip if already correct size
+    except Exception as e:
+        print(f"Error in standardize_clip_size: {str(e)}")
+        return clip  # Return original clip on any error
 
 def process_image_with_pil(image):
     """Process image using PIL with updated resampling method"""
     if isinstance(image, Image.Image):
-        return image.resize(image.size, resample=Image.Resampling.LANCZOS)
+        try:
+            # Use LANCZOS resampling (replacement for deprecated ANTIALIAS)
+            return image.resize(image.size, resample=Image.LANCZOS)
+        except AttributeError:
+            # Fallback for older Pillow versions
+            try:
+                return image.resize(image.size, resample=Image.Resampling.LANCZOS)
+            except AttributeError:
+                # Last resort fallback
+                return image
     return image
 
 def generate_video(song_id: str, transcription_data: list, progress_callback=None):
@@ -370,4 +389,4 @@ if __name__ == "__main__":
     # Generate video (add audio_path if you have the song audio file)
     output_path = generate_video(SONG_ID, transcription_data)
     if output_path:
-        print(f"Video generated successfully at {output_path}") 
+        print(f"Video generated successfully at {output_path}")
