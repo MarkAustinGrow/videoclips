@@ -127,6 +127,12 @@ def get_fallback_clip(text, available_clips, used_clips):
     # If all clips have been used recently, just use the first available one
     return available_clips[0] if available_clips else None
 
+def standardize_clip_size(clip, target_size=(960, 960)):
+    """Resize clip to standard dimensions if needed"""
+    if clip.size != target_size:
+        return clip.resize(target_size)
+    return clip
+
 def generate_video(song_id: str, transcription_data: list, progress_callback=None):
     try:
         temp_dir = "temp_clips"
@@ -134,7 +140,8 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
         clips = []
         current_batch = []
         batch_size = 3
-        used_clips = []  # Track which clips have been used
+        used_clips = []
+        target_size = (960, 960)  # Standard size for all clips
         
         # Get list of available clips
         print("\nChecking available clips...")
@@ -161,7 +168,7 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                 preferred_clip = process_segment(segment, song_id, temp_dir, i, supabase)
                 
                 if preferred_clip is not None and hasattr(preferred_clip, 'get_frame'):
-                    clip = preferred_clip
+                    clip = standardize_clip_size(preferred_clip, target_size)
                 else:
                     # If preferred clip failed, try a fallback
                     fallback_clip_name = get_fallback_clip(segment['text'], available_clips, used_clips)
@@ -170,14 +177,15 @@ def generate_video(song_id: str, transcription_data: list, progress_callback=Non
                         clip_path = os.path.join(temp_dir, f"temp_clip_{i}.mp4")
                         if download_clip(f"http://nginx/videos/{fallback_clip_name}", clip_path):
                             try:
-                                clip = VideoFileClip(clip_path)
+                                raw_clip = VideoFileClip(clip_path)
+                                clip = standardize_clip_size(raw_clip, target_size)
                             except Exception as e:
                                 print(f"Error loading fallback clip: {str(e)}")
                 
                 if clip is not None and hasattr(clip, 'get_frame'):
                     print(f"Clip {i+1} loaded successfully")
                     current_batch.append(clip)
-                    used_clips.append(fallback_clip_name)  # Track which clip was used
+                    used_clips.append(fallback_clip_name)
                 else:
                     print(f"Warning: Invalid clip generated for segment {i+1}")
                     continue
