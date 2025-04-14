@@ -130,8 +130,8 @@ def get_fallback_clip(text, available_clips, used_clips):
 def standardize_clip_size(clip, target_size=(960, 960)):
     """Resize clip to standard dimensions if needed"""
     if clip.size != target_size:
-        # Use Lanczos resampling (formerly known as ANTIALIAS)
-        return clip.resize(target_size, resample='lanczos')
+        # Use bilinear interpolation for resizing
+        return clip.resize(width=target_size[0], height=target_size[1])
     return clip
 
 def generate_video(song_id: str, transcription_data: list, progress_callback=None):
